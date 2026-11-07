@@ -2,7 +2,7 @@
 // Worker's cron starts each one when it's due and remembers when it last did, in feeds ('github-jobs').
 import type { Env } from "./env";
 
-const REPO = "Synxpsis/talkhalifax";
+const REPO = "TalkHalifax/talkhalifax";
 const HOUR = 36e5;
 export const GITHUB_JOBS = [
   { file: "events.yml", every: 6 * HOUR },     // library events: the feed refuses Cloudflare

@@ -23,7 +23,7 @@ describe("starting the GitHub jobs", () => {
   it("starts both jobs the first time, on main, as GitHub requires", async () => {
     await startGithubJobs(withToken, START);
     expect(started()).toEqual(["events.yml", "transit.yml"]);
-    expect(calls[0].url).toBe("https://api.github.com/repos/Synxpsis/talkhalifax/actions/workflows/events.yml/dispatches");
+    expect(calls[0].url).toBe("https://api.github.com/repos/TalkHalifax/talkhalifax/actions/workflows/events.yml/dispatches");
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ ref: "main" });
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer test-token");

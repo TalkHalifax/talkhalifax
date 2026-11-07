@@ -3,7 +3,7 @@
 _A record of everything running on November 5, 2026 (Phase 6 under way). Update it when something changes._
 
 Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). The old
-`talkhalifax.alexwmmolloy.workers.dev` address redirects browsers and still serves the agents, Telegram and the Events job. Repo: github.com/Synxpsis/talkhalifax.
+`talkhalifax.alexwmmolloy.workers.dev` address redirects browsers and still serves the agents, Telegram and the Events job. Repo: github.com/TalkHalifax/talkhalifax (moved from a personal account to the TalkHalifax organization on Nov. 7, 2026).
 
 ## The pieces
 
