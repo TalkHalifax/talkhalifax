@@ -13,7 +13,7 @@ Halifax news, rewritten as short articles with a live chat in each one. Runs on 
 - `src/room.ts`: `ArticleRoom`, one Durable Object per story, holding its chat history, presence and typing
 - `src/auth.ts`: sessions (HttpOnly cookie), Google sign-in, and a localhost-only dev sign-in
 - `src/stats.ts` and `public/stats.js`: anonymous counts of who has the site open and which stories are shown and opened, for the admin site's charts
-- `admin/`: the admin site, a separate read-only Worker on the same database, behind Cloudflare Access (see below)
+- `admin/`: the admin site, a separate read-only Worker on the same database, behind a username and password (see below)
 - `migrations/`: the D1 schema. `scripts/articles/` plus `scripts/build-seed.mjs` load the current stories.
 
 ## Run locally
@@ -57,22 +57,25 @@ Secrets live on the Worker, not in the repo:
 
 ## The admin site
 
-`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`admin/`) that shares the site's D1 database. Stage 1 is read-only. Every push to `main` deploys it after the main site. It has no `workers.dev` address, and it refuses every request until Access is set up.
+`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`admin/`) that shares the site's D1 database. Stage 1 is read-only. Every push to `main` deploys it after the main site. It has no `workers.dev` address, and it refuses every request until its username and password are set.
 
-To set it up, once, in the Cloudflare dashboard:
-1. **Zero Trust › Access › Applications › Add an application › Self-hosted.** Set the domain to `admin.talkhalifax.ca` and add a policy that allows only your own login. Copy the application's **AUD tag**, and note your team domain (`yourteam.cloudflareaccess.com`).
-2. Store both on the admin Worker:
+To set it up, once:
+1. Store a username and password on the admin Worker. Pick a password of at least 16 characters, or the site won't use it. The address is public, so make it hard to guess: a passphrase of four or more unrelated words works, or one a password manager makes. Don't reuse one from another site, and keep it unrelated to TalkHalifax or Halifax. Both are secrets because this repo is public.
    ```bash
-   npx wrangler secret put ACCESS_TEAM_DOMAIN --config admin/wrangler.jsonc
-   npx wrangler secret put ACCESS_AUD --config admin/wrangler.jsonc
+   npx wrangler secret put ADMIN_USER --config admin/wrangler.jsonc
+   npx wrangler secret put ADMIN_PASSWORD --config admin/wrangler.jsonc
    ```
-3. **Workers & Pages › talkhalifax-admin › Settings › Domains & Routes:** add the custom domain `admin.talkhalifax.ca`.
+2. **Workers & Pages › talkhalifax-admin › Settings › Domains & Routes:** add the custom domain `admin.talkhalifax.ca`.
+
+Signing in keeps you in for 12 hours, and **Sign out** ends it on that browser. Changing the password signs everyone out. Sign-in attempts are limited to 5 a minute from one IP address.
+
+**Later, Cloudflare Access** can replace the password: set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on the admin Worker, after creating a self-hosted Access application for `admin.talkhalifax.ca` that allows only your login. Once either is set, the Worker uses Access and ignores the password.
 
 To run it locally against your local data:
 ```bash
 npx wrangler dev --config admin/wrangler.jsonc --port 8790 --persist-to .wrangler/state --var ADMIN_DEV:1
 ```
-`ADMIN_DEV` only skips the Access check on localhost. Never set it on the real Worker.
+`ADMIN_DEV` only skips the sign-in check on localhost. Never set it on the real Worker.
 
 ## Moderators
 

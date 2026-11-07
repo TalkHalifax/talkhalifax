@@ -17,6 +17,8 @@
   const day = v => v ? when(v).split(",")[0] : "Never";
   const get = async path => {
     const r = await fetch(path, { headers: { accept: "application/json" } });
+    // The session ran out: back to the sign-in page
+    if (r.status === 401) { location.href = "/login"; throw new Error("Signed out"); }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   };

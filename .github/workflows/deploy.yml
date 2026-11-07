@@ -91,5 +91,5 @@ jobs:
           for path in / /admin.js /api/users; do
             code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://admin.talkhalifax.ca$path" || true)
             echo "admin.talkhalifax.ca$path answered HTTP $code"
-            if [ "$code" = "200" ]; then echo "::error::The admin site answered $path without a sign-in. Check its Cloudflare Access application."; exit 1; fi
+            if [ "$code" = "200" ]; then echo "::error::The admin site answered $path without a sign-in. Check its sign-in."; exit 1; fi
           done

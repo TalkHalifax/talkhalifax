@@ -1,5 +1,6 @@
-// The admin site: a separate Worker on the same database, reached only through Cloudflare Access.
-// Its address (admin.talkhalifax.ca) is a custom domain set in the dashboard, like the main site's.
+// The admin site: a separate Worker on the same database, behind the editor's username and password (the ADMIN_USER and
+// ADMIN_PASSWORD secrets), or Cloudflare Access once that's set up. Its address (admin.talkhalifax.ca) is a custom
+// domain set in the dashboard, like the main site's.
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "talkhalifax-admin",
@@ -7,9 +8,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
 
-  // No workers.dev or preview address: either one would be a way in that doesn't go through the Access login page.
+  // No workers.dev or preview address: only the one address the editor knows about.
   "workers_dev": false,
   "preview_urls": false,
+
+  // Sign-in attempts per IP address: enough for typos, too few for guessing a long password.
+  "ratelimits": [{ "name": "LOGIN_LIMIT", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } }],
 
   // The Worker runs first so the page itself is behind the sign-in check too.
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },

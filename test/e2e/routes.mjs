@@ -140,6 +140,8 @@ try {
     // Only a boil-water advisory pins to Home; one street's emergency shut-off stays on Notices
     {
       const p = await open("home");
+      // A real weather warning, fetched live, can come first and fold the rest behind "+1 more"
+      await p.evaluate(() => document.getElementById("abarMore")?.click());
       const bars = await p.evaluate(() => document.getElementById("abars").innerText);
       ok(bars.includes("Boil Water Advisory"), `${label}: a boil-water advisory pins to Home`);
       ok(!bars.includes("One Street"), `${label}: a one-street shut-off doesn't`);
@@ -223,6 +225,8 @@ try {
   ok(/"preview_urls":\s*false/.test(adminConfig), "admin config: no preview addresses");
   ok(/"run_worker_first":\s*true/.test(adminConfig), "admin config: pages go through the sign-in check");
   ok(!adminConfig.includes("ADMIN_DEV"), "admin config: doesn't set the local bypass");
+  ok(/"name":\s*"LOGIN_LIMIT"/.test(adminConfig), "admin config: limits sign-in attempts");
+  ok(!/ADMIN_(USER|PASSWORD)"?\s*:/.test(adminConfig), "admin config: the username and password are secrets, not in the file");
 
   // The admin site, on the same throwaway data
   adminServer = spawn("npx", ["wrangler", "--config", "test/wrangler.admin.jsonc", "dev", "--port", String(ADMIN_PORT), "--persist-to", DATA, "--inspector-port", "9331"], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });

@@ -124,6 +124,105 @@ describe("the admin site's front door", () => {
   });
 });
 
+describe("signing in with a username and password", () => {
+  const USER = "editor", PASSWORD = "a-long-test-password-123";
+  const withPassword = (extra: Partial<AdminEnv> = {}): AdminEnv => ({ DB: env.DB, ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, ...extra });
+  const SITE = "https://admin.talkhalifax.ca";
+  const signIn = (user: string, password: string, e = withPassword(), headers: Record<string, string> = { origin: SITE }) =>
+    handle(req("/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ user, password }).toString() }), e, NOW);
+  const cookieFrom = (r: Response) => (r.headers.get("set-cookie") || "").split(";")[0];
+  const asUser = (path: string, cookie: string, e = withPassword(), at = NOW) => handle(req(path, { headers: { cookie } }), e, at);
+
+  it("sends strangers to the sign-in page, and refuses the data and the script", async () => {
+    const page = await handle(req("/"), withPassword(), NOW);
+    expect(page.status).toBe(303);
+    expect(page.headers.get("location")).toBe("/login");
+    expect((await handle(req("/admin.js"), withPassword(), NOW)).status).toBe(303);
+    for (const path of ["/api/users", "/api/summary", "/api/overview"]) expect((await handle(req(path), withPassword(), NOW)).status).toBe(401);
+    const login = await handle(req("/login"), withPassword(), NOW);
+    expect(login.status).toBe(200);
+    expect(await login.text()).toContain('action="/login"');
+    expect((await handle(req("/admin.css"), withPassword(), NOW)).status).toBe(200);
+  });
+  it("signs in with the right username and password, with a cookie scripts can't read", async () => {
+    const r = await signIn(USER, PASSWORD);
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/");
+    const set = r.headers.get("set-cookie") || "";
+    for (const flag of ["__Host-th-admin=", "HttpOnly", "Secure", "SameSite=Strict", "Path=/"]) expect(set).toContain(flag);
+    expect(set).not.toContain(PASSWORD);
+    const page = await asUser("/", cookieFrom(r));
+    expect(page.status).toBe(200);
+    expect((await asUser("/api/summary", cookieFrom(r))).status).toBe(200);
+  });
+  it("refuses a wrong password or username, without saying which", async () => {
+    const a = await signIn(USER, "wrong-password-but-long"), b = await signIn("someone", PASSWORD);
+    expect(a.status).toBe(401);
+    expect(b.status).toBe(401);
+    expect(await a.text()).toBe(await b.text());
+    expect(a.headers.get("set-cookie")).toBeNull();
+  });
+  it("refuses a sign-in posted from another site", async () => {
+    expect((await signIn(USER, PASSWORD, withPassword(), { origin: "https://evil.test" })).status).toBe(403);
+    expect((await signIn(USER, PASSWORD, withPassword(), {})).status).toBe(403);
+  });
+  it("refuses forged, tampered and expired sessions", async () => {
+    const good = cookieFrom(await signIn(USER, PASSWORD));
+    const [name, value] = good.split("=");
+    const [exp, sig] = value.split(".");
+    expect((await asUser("/api/users", `${name}=${Number(exp) + 3_600_000}.${sig}`)).status).toBe(401);
+    expect((await asUser("/api/users", `${name}=${exp}.${"A".repeat(43)}`)).status).toBe(401);
+    expect((await asUser("/api/users", `${name}=nonsense`)).status).toBe(401);
+    expect((await asUser("/api/users", good, withPassword(), NOW + 13 * HOUR)).status).toBe(401);
+    expect((await asUser("/api/users", good, withPassword(), NOW + 11 * HOUR)).status).toBe(200);
+  });
+  it("signs everyone out when the password changes", async () => {
+    const good = cookieFrom(await signIn(USER, PASSWORD));
+    expect((await asUser("/api/users", good, withPassword({ ADMIN_PASSWORD: "a-different-long-password" }))).status).toBe(401);
+  });
+  it("won't use a short password, or a missing username, at all", async () => {
+    for (const e of [withPassword({ ADMIN_PASSWORD: "short-password" }), withPassword({ ADMIN_USER: undefined })]) {
+      expect((await handle(req("/"), e, NOW)).status).toBe(503);
+      expect((await signIn(USER, e.ADMIN_PASSWORD || "", e)).status).toBe(503);
+    }
+  });
+  it("limits sign-in attempts by address", async () => {
+    const keys: string[] = [];
+    const limited = withPassword({ LOGIN_LIMIT: { limit: async (o: { key: string }) => { keys.push(o.key); return { success: false }; } } });
+    const r = await signIn(USER, PASSWORD, limited, { origin: SITE, "cf-connecting-ip": "203.0.113.5" });
+    expect(r.status).toBe(429);
+    expect(r.headers.get("set-cookie")).toBeNull();
+    expect(keys).toEqual(["203.0.113.5"]);
+  });
+  it("refuses an oversized sign-in form", async () => {
+    const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(`user=${"x".repeat(5000)}`)); c.close(); } });
+    const r = await handle(req("/login", { method: "POST", headers: { origin: SITE, "content-type": "application/x-www-form-urlencoded" }, body: big }), withPassword(), NOW);
+    expect(r.status).toBe(413);
+  });
+  it("signs out by clearing the cookie", async () => {
+    const good = cookieFrom(await signIn(USER, PASSWORD));
+    const r = await handle(req("/logout", { method: "POST", headers: { cookie: good, origin: SITE } }), withPassword(), NOW);
+    expect(r.status).toBe(303);
+    expect(r.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+  it("is still read-only once signed in", async () => {
+    const good = cookieFrom(await signIn(USER, PASSWORD));
+    expect((await handle(req("/api/users", { method: "POST", headers: { cookie: good, origin: SITE } }), withPassword(), NOW)).status).toBe(405);
+  });
+  it("uses Access instead whenever Access settings are present", async () => {
+    const both = { ...withPassword(), ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD };
+    expect((await signIn(USER, PASSWORD, both)).status).toBe(403);
+    expect((await handle(req("/", { headers: { "cf-access-jwt-assertion": await token() } }), both, NOW)).status).toBe(200);
+  });
+  it("sends the security headers on the sign-in page", async () => {
+    const r = await handle(req("/login"), withPassword(), NOW);
+    expect(r.headers.get("content-security-policy")).toContain("form-action 'self'");
+    // "no-referrer" would make browsers send "Origin: null" with the form, and every sign-in would be refused
+    expect(r.headers.get("referrer-policy")).toBe("same-origin");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
 describe("what the admin site shows", () => {
   it("never returns email addresses, password hashes, personas or Google ids", async () => {
     await makeUser("u_pw", { provider_sub: "nora", name: "Nora" });

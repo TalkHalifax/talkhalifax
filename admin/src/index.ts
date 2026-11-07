@@ -1,8 +1,13 @@
-// The admin site's Worker. Stage 1 is read-only: every route is a GET and every query a SELECT.
+// The admin site's Worker. Stage 1 is read-only: every data route is a GET and every query a SELECT.
 // It never returns email addresses, password hashes, the journalist's private persona, or Google account ids.
+// The front door is Cloudflare Access when that's set up, otherwise the editor's username and password.
 import { validAccessToken, validTeam } from "./access";
+import {
+  clearedCookie, cookieValue, loginPage, newSession, PasswordEnv, passwordReady, readForm, rightCredentials,
+  SESSION_COOKIE, sessionCookie, validSession,
+} from "./password";
 
-export interface AdminEnv {
+export interface AdminEnv extends PasswordEnv {
   DB: D1Database;
   ASSETS: Fetcher;
   /** The Access team's address, like yourteam.cloudflareaccess.com. Without it and ACCESS_AUD, everything is refused. */
@@ -17,9 +22,10 @@ const TZ = "America/Halifax", SITE = "https://talkhalifax.ca", HOUR_MS = 36e5, D
 const ONLINE_FRESH_MS = 10 * 60_000, PAGE_SIZE = 100, MAX_ITEMS = 500;
 
 const SECURITY: Record<string, string> = {
-  "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "x-content-type-options": "nosniff",
-  "referrer-policy": "no-referrer",
+  // Nothing to other sites. Not "no-referrer": that makes browsers send "Origin: null" on the sign-in form, which it refuses
+  "referrer-policy": "same-origin",
   "cache-control": "no-store",
 };
 const secured = (res: Response) => {
@@ -31,13 +37,44 @@ const json = (data: unknown, status = 200) => new Response(JSON.stringify(data),
 
 const isLocal = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "[::1]";
 
-/** A refusal, or null to let the request through. With Access not configured, nobody gets in. */
-async function refuse(req: Request, env: AdminEnv, url: URL, now: number): Promise<Response | null> {
-  if (env.ADMIN_DEV === "1" && isLocal(url.hostname)) return null;
-  if (!env.ACCESS_TEAM_DOMAIN || !validTeam(env.ACCESS_TEAM_DOMAIN) || !env.ACCESS_AUD) return new Response("The admin site isn't set up yet: its Access settings are missing or wrong.", { status: 503 });
+const NOT_SET_UP = "The admin site isn't set up yet: set its username and password, or its Access settings.";
+const sameOrigin = (req: Request, url: URL) => req.headers.get("origin") === url.origin;
+const redirect = (to: string, cookie?: string) => new Response(null, { status: 303, headers: { location: to, ...(cookie ? { "set-cookie": cookie } : {}) } });
+
+/** Cloudflare Access's signed token. Either setting present means Access is the front door, so a half-done setup refuses. */
+async function accessGate(req: Request, env: AdminEnv, now: number): Promise<Response | null> {
+  if (!env.ACCESS_TEAM_DOMAIN || !validTeam(env.ACCESS_TEAM_DOMAIN) || !env.ACCESS_AUD) return new Response(NOT_SET_UP, { status: 503 });
   const token = req.headers.get("cf-access-jwt-assertion");
   if (!token || !await validAccessToken(token, env.ACCESS_TEAM_DOMAIN, env.ACCESS_AUD, now)) return new Response("Sign in through Cloudflare Access.", { status: 403 });
   return null;
+}
+
+/** The username and password. Answers the sign-in page itself; otherwise null for a signed-in request, or a refusal. */
+async function passwordGate(req: Request, env: AdminEnv, url: URL, now: number): Promise<Response | null> {
+  const signedIn = await validSession(env, cookieValue(req, SESSION_COOKIE), now);
+  if (url.pathname === "/login") {
+    if (req.method === "GET" || req.method === "HEAD") return signedIn ? redirect("/") : loginPage();
+    if (req.method !== "POST") return new Response("Not allowed", { status: 405, headers: { allow: "GET, POST" } });
+    if (!sameOrigin(req, url)) return new Response("Bad request", { status: 403 });
+    const ip = req.headers.get("cf-connecting-ip") || "unknown";
+    if (env.LOGIN_LIMIT && !(await env.LOGIN_LIMIT.limit({ key: ip })).success) return loginPage("Too many tries. Wait a minute, then try again.", 429);
+    const form = await readForm(req);
+    if (!form) return loginPage("That didn't work. Try again.", 413);
+    if (!await rightCredentials(env, form.get("user") || "", form.get("password") || "")) return loginPage("That username and password don't match.", 401);
+    return redirect("/", sessionCookie(await newSession(env, now)));
+  }
+  // The stylesheet only, so the sign-in page has its look. Pages, scripts and data all need a session.
+  if (signedIn || (url.pathname === "/admin.css" && req.method === "GET")) return null;
+  if (url.pathname.startsWith("/api/")) return json({ error: "Sign in first" }, 401);
+  return req.method === "GET" || req.method === "HEAD" ? redirect("/login") : new Response("Sign in first", { status: 401 });
+}
+
+/** A refusal, or null to let the request through. With neither front door set up, nobody gets in. */
+async function refuse(req: Request, env: AdminEnv, url: URL, now: number): Promise<Response | null> {
+  if (env.ADMIN_DEV === "1" && isLocal(url.hostname)) return null;
+  if (env.ACCESS_TEAM_DOMAIN || env.ACCESS_AUD) return accessGate(req, env, now);
+  if (passwordReady(env)) return passwordGate(req, env, url, now);
+  return new Response(NOT_SET_UP, { status: 503 });
 }
 
 // ---------- time buckets ----------
@@ -289,10 +326,11 @@ async function api(url: URL, env: AdminEnv, now: number): Promise<Response> {
 
 export async function handle(req: Request, env: AdminEnv, now = Date.now()): Promise<Response> {
   const url = new URL(req.url);
-  const no = await refuse(req, env, url, now);
-  if (no) return secured(no);
-  if (req.method !== "GET" && req.method !== "HEAD") return secured(new Response("This site is read-only.", { status: 405, headers: { allow: "GET, HEAD" } }));
   try {
+    const no = await refuse(req, env, url, now);
+    if (no) return secured(no);
+    if (url.pathname === "/logout" && req.method === "POST") return secured(sameOrigin(req, url) ? redirect("/", clearedCookie) : new Response("Bad request", { status: 403 }));
+    if (req.method !== "GET" && req.method !== "HEAD") return secured(new Response("This site is read-only.", { status: 405, headers: { allow: "GET, HEAD" } }));
     return secured(url.pathname.startsWith("/api/") ? await api(url, env, now) : await env.ASSETS.fetch(req));
   } catch (e) {
     console.error(e);

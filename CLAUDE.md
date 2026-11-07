@@ -29,7 +29,7 @@ standards-keeper, docs-keeper).
 
 ## Admin site
 
-`admin/` is a separate Worker on the same D1 database, behind Cloudflare Access. Migrations stay in `migrations/`, and it must keep refusing every request when Access isn't configured. See [README.md](README.md).
+`admin/` is a separate Worker on the same D1 database, behind a username and password (or Cloudflare Access, once set up). Migrations stay in `migrations/`, and it must keep refusing every request when neither is configured. See [README.md](README.md).
 
 ## Line endings
 

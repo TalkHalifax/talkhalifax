@@ -69,7 +69,7 @@ features land on a codebase that can take them.
 - An accessibility pass (contrast, focus order, screen reader labels on chat).
 
 **6e. Admin site** (`admin/`, editor's decision, Nov. 6)
-A separate Worker behind Cloudflare Access, on the same database, organized as Users, Content and Administration.
+A separate Worker behind a username and password (Cloudflare Access later), on the same database, organized as Users, Content and Administration.
 - ✅ Stage 1, read-only: Home with charts over time, the member list, all content across screens, sources and job health, plus anonymous counts on the public site for people online, clicks and impressions.
 - Stage 2, Users and moderation: reports, bans, reset links, role changes, a new Admin role, a live chat feed across rooms and an action log. Do chat retention (**D1**) and the restore plan (**D2**) first, since this is when it starts changing real data. Move roles out of `ADMIN_USERNAMES`, which restores moderator at each sign-in.
 - Stage 3, live controls: feature switches, a site banner and announcements to all chat rooms. If settings can't load, everything stays on.
