@@ -1,6 +1,6 @@
 # TalkHalifax: roadmap
 
-_Last updated November 6, 2026. [VISION.md](VISION.md) says why, this file says what's next and in what order,
+_Last updated November 7, 2026. [VISION.md](VISION.md) says why, this file says what's next and in what order,
 and [TECH-DEBT.md](TECH-DEBT.md) has the items marked like **N1**._
 
 The order follows the principles: first keep facts right, then keep the site up, then make it feel native, then grow.
@@ -36,6 +36,11 @@ features land on a codebase that can take them.
 - Split `app.js` into modules and move the CSS to its own file, no bundler (**C4**).
 - ✅ First automated tests: screening rules, check-in and stage timing, pending updates, bans and rate limits, run in CI
   before deploy (**C1**, first slice).
+- ✅ Security headers on every response, with the content policy report-only (Nov. 7). Switch it on after a few quiet
+  days, once there's a way to see violations (**C10**).
+- Check the Billing page for the account's plan (**C7**, editor).
+- Put the custom domains in `wrangler.jsonc` once the deploy token can manage routes (**C9**, waiting on the editor).
+- Stop the request logs connecting a signed-in reader's account to their IP address (**D6**).
 
 **6b. Installable and offline** (built Nov. 5)
 - ✅ A web manifest, icons and a splash colour, following [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md).
@@ -69,9 +74,9 @@ features land on a codebase that can take them.
 - An accessibility pass (contrast, focus order, screen reader labels on chat).
 
 **6e. Admin site** (`admin/`, editor's decision, Nov. 6)
-A separate Worker behind a username and password (Cloudflare Access later), on the same database, organized as Users, Content and Administration.
+A separate Worker behind a username and password (Cloudflare Access later, **D7**), on the same database, organized as Users, Content and Administration.
 - ✅ Stage 1, read-only: Home with charts over time, the member list, all content across screens, sources and job health, plus anonymous counts on the public site for people online, clicks and impressions.
-- Stage 2, Users and moderation: reports, bans, reset links, role changes, a new Admin role, a live chat feed across rooms and an action log. Do chat retention (**D1**) and the restore plan (**D2**) first, since this is when it starts changing real data. Move roles out of `ADMIN_USERNAMES`, which restores moderator at each sign-in.
+- Stage 2, Users and moderation: reports, bans, reset links, role changes, a new Admin role, a live chat feed across rooms and an action log. Do chat retention (**D1**), the restore plan (**D2**) and a stronger lock than the password (**D7**) first, since this is when it starts changing real data. Move roles out of `ADMIN_USERNAMES`, which restores moderator at each sign-in.
 - Stage 3, live controls: feature switches, a site banner and announcements to all chat rooms. If settings can't load, everything stays on.
 - Stage 4, editing and SEO: manual story edits through version history, then real story URLs (stories are `/#article-…` today, which search engines don't treat as pages), then SEO fields.
 
