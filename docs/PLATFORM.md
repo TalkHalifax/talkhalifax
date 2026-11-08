@@ -141,7 +141,7 @@ Cloud routines: environment variable `TALKHALIFAX_TOKEN` (the newsroom token) an
 
 **`.github/CODEOWNERS`** names the editor as owner of every file. The ruleset doesn't require code-owner review yet, because agents act under the editor's GitHub account (TECH-DEBT **C11**).
 
-**The agent guard** (`.claude/hooks/agent-guard.mjs`) is a `PreToolUse` hook, registered in `.claude/settings.json`, that runs before every tool call in Claude Code. It runs outside the model, so an agent can't talk past it. It only acts on a subagent with a policy file, `.claude/agents/policy/<name>.json`; the editor's own session and the build agents (no policy file) are unaffected. No agent has a policy yet. For an agent that has one, it checks:
+**The agent guard** (`.claude/hooks/agent-guard.mjs`) is a `PreToolUse` hook, registered in `.claude/settings.json`, that runs before every tool call in Claude Code. It runs outside the model, so an agent can't talk past it. It only acts on a subagent with a policy file, `.claude/agents/policy/<name>.json`; the editor's own session and the build agents (no policy file) are unaffected. Policies are always read from the main checkout (`CLAUDE_PROJECT_DIR`). Paths are judged against the session's linked worktree when it runs in one at `.claude/worktrees/<name>/` (as Claude Code desktop does), so the main checkout and other worktrees count as outside the repo. For an agent that has a policy, it checks:
 
 - the tool is in the policy's list (PowerShell is always refused);
 - edits stay inside the policy's allowed paths, and reads stay inside the repo;

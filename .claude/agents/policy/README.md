@@ -71,7 +71,10 @@ Unknown keys are refused, so a typo can't silently drop a rule.
 - `edit`: for Edit, Write and NotebookEdit. Repo-relative paths with forward slashes; `*` stays within one folder,
   `**` spans any depth. `deny` wins over `allow`; no `allow` means no edits. Paths outside the repo are refused.
 - Reads (Read, Grep, Glob, LS, and any tool given a `path`) must stay inside the repo, after following links.
-  Relative paths resolve against the session's folder, as the tools do.
+  Relative paths resolve against the session's folder, as the tools do. "The repo" is the main checkout, unless the
+  session runs in a genuine linked worktree at `.claude/worktrees/<name>/` (Claude Code desktop does this). Then it
+  is that worktree, judged with its own `.claude/`, `scripts/` and so on, and the main checkout and other worktrees
+  count as outside. Policies are always read from the main checkout.
 - `bash`: the command must match one pattern, token for token. A literal must be equal, `*` is exactly one token,
   `re:<regex>` must match the whole token, and a final `**` takes any remaining tokens (none included). Without a
   final `**` the token count must be equal. A final `**` is refused for any `git` pattern, for `npm`, `npx`, `node`,
