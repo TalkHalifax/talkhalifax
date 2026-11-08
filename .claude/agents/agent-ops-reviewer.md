@@ -32,7 +32,9 @@ manager's list of what changed. You don't see the drafting notes.
    - `git push -u origin agent-ops/<job-id>`;
    - `gh pr create --base main --head agent-ops/<job-id> --title "<title>" --body "<body>"`. The body links the
      approved change request and the job, lists each change and the line of the request that covers it, and ends
-     with the editor's next step: review, run `npm run agents:promote` on the branch, commit, push, merge.
+     with the editor's next step: "Review, then promote the drafts as `agent-drafts/README.md` describes, commit,
+     push and merge." Don't name the promote script or its npm command anywhere in a command: the agent guard
+     refuses any command that contains them, even inside quoted text.
 4. Report the pull request link, or the gaps, and what you ran with its results.
 
 ## Rules
