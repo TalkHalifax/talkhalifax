@@ -1,0 +1,1 @@
+{ "agent": "open-wrangler", "tools": ["Bash"], "bash": [["npx", "wrangler", "dev", "**"]] }

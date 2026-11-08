@@ -1,0 +1,1 @@
+{ "agent": "open-push", "tools": ["Bash"], "bash": [["git", "push", "**"]] }

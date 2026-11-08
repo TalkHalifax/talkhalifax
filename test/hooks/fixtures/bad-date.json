@@ -1,0 +1,1 @@
+{ "agent": "bad-date", "tools": ["Read"], "expires": { "x": "2026-02-30" } }

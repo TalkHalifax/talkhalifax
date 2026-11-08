@@ -1,0 +1,1 @@
+{ "agent": "mid-glob", "tools": ["Bash"], "bash": [["npm", "**", "test"]] }

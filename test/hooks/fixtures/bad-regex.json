@@ -1,0 +1,1 @@
+{ "agent": "bad-regex", "tools": ["Bash"], "bash": [["git", "re:("]] }

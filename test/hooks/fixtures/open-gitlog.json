@@ -1,0 +1,1 @@
+{ "agent": "open-gitlog", "tools": ["Bash"], "bash": [["git", "log", "**"]] }

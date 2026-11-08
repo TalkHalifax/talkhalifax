@@ -1,0 +1,1 @@
+{ "agent": "open-git", "tools": ["Bash"], "bash": [["git", "**"]] }
