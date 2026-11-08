@@ -17,8 +17,12 @@ const tag = (xml: string, name: string) => {
   return m ? m[1].replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, "$1").trim() : "";
 };
 const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", ndash: "–", mdash: "—", hellip: "…" };
-const decode = (s: string) => s.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
-  e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : +e.slice(1)) : entities[e.toLowerCase()] ?? m);
+const decode = (s: string) => s.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+  if (e[0] !== "#") return entities[e.toLowerCase()] ?? m;
+  const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : +e.slice(1);
+  // An out-of-range code point (past U+10FFFF) can't be decoded, so it stays as written
+  return n <= 0x10ffff ? String.fromCodePoint(n) : m;
+});
 /** The description as plain text, up to the first rule (the library puts ages and fine print after an <hr>). */
 const summary = (html: string) => {
   const main = html.split(/<hr\s*\/?>/i)[0];
