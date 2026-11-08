@@ -1,0 +1,23 @@
+{
+  "agent": "agent-ops-project-manager",
+  "tools": [
+    "Read",
+    "Glob",
+    "Grep",
+    "Edit",
+    "Write",
+    "Bash",
+    "SendMessage",
+    "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-search",
+    "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-fetch"
+  ],
+  "edit": {
+    "allow": ["agent-drafts/*.md", "agent-drafts/policy/*.json"],
+    "deny": []
+  },
+  "bash": [
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "diff", "--", "agent-drafts"]
+  ]
+}
