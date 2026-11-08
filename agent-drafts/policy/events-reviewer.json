@@ -1,0 +1,20 @@
+{
+  "agent": "events-reviewer",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Bash"],
+  "edit": {
+    "allow": [],
+    "deny": []
+  },
+  "bash": [
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "diff", "*"],
+    ["git", "log", "--oneline", "-20"],
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"]
+  ]
+}
