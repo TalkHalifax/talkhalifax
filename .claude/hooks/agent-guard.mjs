@@ -63,6 +63,43 @@ function repoRoot() {
 }
 
 const policyFile = (root, name) => path.join(root, ".claude", "agents", "policy", `${name}.json`);
+const samePath = (a, b) => path.relative(a, b) === "";
+
+// Claude Code desktop runs sessions in linked worktrees at <policy root>/.claude/worktrees/<name>/ while
+// CLAUDE_PROJECT_DIR stays the main checkout. Paths are judged against that worktree when the session's cwd is
+// inside one and it's a genuine worktree of this repository; otherwise against the policy root.
+function workRoot(policyRoot, cwd) {
+  if (typeof cwd !== "string" || !cwd || cwd.length > MAX_LEN) return policyRoot;
+  try {
+    const realPolicy = fs.realpathSync.native(policyRoot);
+    const worktrees = path.join(realPolicy, ".claude", "worktrees");
+    const rel = path.relative(worktrees, fs.realpathSync.native(cwd));
+    if (!rel || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return policyRoot;
+    const name = rel.split(path.sep)[0];
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name)) return policyRoot;
+    const dir = path.join(worktrees, name);
+    return isLinkedWorktree(dir, realPolicy) ? dir : policyRoot;
+  } catch {
+    return policyRoot;
+  }
+}
+
+// <dir>/.git is a file naming <policy root>/.git/worktrees/<id>, whose commondir is <policy root>/.git and whose
+// gitdir file points back at <dir>/.git
+function isLinkedWorktree(dir, realPolicy) {
+  const dotGit = path.join(dir, ".git");
+  if (!fs.lstatSync(dotGit).isFile()) return false;
+  const m = /^gitdir:[ \t]*(.+?)[ \t]*$/m.exec(fs.readFileSync(dotGit, "utf8"));
+  if (!m) return false;
+  const mainGit = fs.realpathSync.native(path.join(realPolicy, ".git"));
+  const gitdir = fs.realpathSync.native(path.resolve(dir, m[1]));
+  const id = path.relative(path.join(mainGit, "worktrees"), gitdir);
+  if (!id || id.includes(path.sep) || id.startsWith("..") || path.isAbsolute(id)) return false;
+  const common = fs.readFileSync(path.join(gitdir, "commondir"), "utf8").trim();
+  const back = fs.readFileSync(path.join(gitdir, "gitdir"), "utf8").trim();
+  return samePath(fs.realpathSync.native(path.resolve(gitdir, common)), mainGit)
+    && samePath(fs.realpathSync.native(path.resolve(gitdir, back)), fs.realpathSync.native(dotGit));
+}
 
 function loadPolicy(root, agent) {
   // Policy files are lowercase; a capitalised name that has one (case-insensitive disks) is refused, not skipped
@@ -421,18 +458,19 @@ function runsTests(tokens) {
     || (["run", "run-script"].includes(tokens[i + 1]) && /^test/.test(tokens[i + 2] ?? "")))));
 }
 
-// Absolute paths, ~ and .. are refused when they land outside the repo (Bash can read and write through them)
-function outsidePath(part, root, base) {
-  if (part.startsWith("~") || (!WIN && /^[A-Za-z]:[\\/]/.test(part))) return true;
-  if (!/^([\\/]|[A-Za-z]:[\\/])/.test(part) && !part.split(/[\\/]/).includes("..")) return false;
-  const rel = path.relative(realish(path.resolve(root)), realish(path.resolve(base, part)));
-  return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
-}
-
-// .claude/ holds the guard, its settings and the agents; no command may name it
-function claudePath(part) {
-  const p = part.replace(/\\/g, "/").toLowerCase();
-  return p === ".claude" || p.startsWith(".claude/") || p.includes("/.claude/") || p.endsWith("/.claude") || p.includes("settings.local.json");
+// A path-like word in a command, judged by where it lands: outside the work root (absolute, ~ or ..), or in a
+// .claude folder inside it (the guard, its settings and the agents). Git Bash's /d/... means D:\... on Windows.
+function bashPathProblem(part, root, base) {
+  if (part.toLowerCase().includes("settings.local.json")) return "it names a path under .claude/";
+  if (part.startsWith("~") || (!WIN && /^[A-Za-z]:[\\/]/.test(part))) return "it names a path outside the repository";
+  const segs = part.split(/[\\/]/);
+  const absolute = /^([\\/]|[A-Za-z]:[\\/])/.test(part);
+  if (!absolute && !segs.includes("..") && !segs.some((s) => s.toLowerCase() === ".claude")) return null;
+  const native = WIN ? part.replace(/^\/([A-Za-z])(?=\/|$)/, "$1:") : part;
+  const rel = path.relative(realish(path.resolve(root)), realish(path.resolve(base, native)));
+  if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return "it names a path outside the repository";
+  if (rel.split(path.sep).some((s) => s.toLowerCase() === ".claude")) return "it names a path under .claude/";
+  return null;
 }
 
 // What a word can name: itself, each side of "=" (--opt=value), and a value glued to a short option
@@ -471,8 +509,8 @@ function hardBashProblem(tokens, root, base) {
     if (persistValueAt(tokens, i)) continue;
     for (const part of wordParts(tokens[i])) {
       if (isSecretPath(part)) return "it names a secret file or folder";
-      if (claudePath(part)) return "it names a path under .claude/";
-      if (outsidePath(part, root, base)) return "it names a path outside the repository";
+      const where = bashPathProblem(part, root, base);
+      if (where) return where;
     }
   }
   return null;
@@ -499,6 +537,9 @@ function checkBash(agent, policy, input, root, base) {
   if (error) refuse(`agent-guard: ${agent} may not run that command (it contains ${error}; run one plain command and quote special characters)`);
   if (!tokens.length) refuse(`agent-guard: ${agent} may not run an empty command`);
   const what = show(tokens.slice(0, 3).join(" "));
+  // Every relative word lands in the session's folder, so that folder must pass the same test as a path word
+  const here = bashPathProblem(path.resolve(base), root, base);
+  if (here) refuse(`agent-guard: ${agent} may not run "${what}..." (the session's folder: ${here.replace(/^it names /, "")})`);
   const hard = hardBashProblem(tokens, root, base);
   if (hard) refuse(`agent-guard: ${agent} may not run "${what}..." (${hard})`);
   if (!(policy.bash ?? []).some((pat) => patternMatches(pat, tokens))) refuse(`agent-guard: ${agent} may not run "${what}..." (no pattern in its policy allows it)`);
@@ -534,20 +575,24 @@ function decide(input) {
   const agent = input.agent_type;
   if (agent === undefined || agent === null || agent === "") return;
   if (typeof agent !== "string" || agent.length > 64 || !/^[A-Za-z0-9-]+$/.test(agent)) refuse("agent-guard: an agent with an invalid name may not use any tool");
-  const root = repoRoot();
-  const policy = loadPolicy(root, agent);
+  // Policies always come from the policy root, where Claude Code loads agents; paths are judged against the work root
+  const policyRoot = repoRoot();
+  const policy = loadPolicy(policyRoot, agent);
   if (!policy) return;
   const tool = input.tool_name;
   const toolInput = isObject(input.tool_input) ? input.tool_input : {};
+  // The subagent's return channel: always allowed, and nothing in its input is read
+  if (tool === "SubagentHandback") return;
   if (typeof tool !== "string" || !policy.tools.includes(tool)) refuse(`agent-guard: ${agent} may not use ${show(tool)} (not a tool in its policy)`);
   if (tool === "PowerShell") refuse(`agent-guard: ${agent} may not use PowerShell (the guard can only check Bash commands)`);
+  const root = workRoot(policyRoot, input.cwd);
   // Relative paths resolve against the session's folder, as the tools themselves do
   const base = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
   if (EDIT_TOOLS.has(tool)) return checkEdit(agent, policy, tool === "NotebookEdit" ? toolInput.notebook_path : toolInput.file_path, root, base);
   if (READ_TOOLS.has(tool)) return checkRead(agent, tool, toolInput, root, base);
   if (tool === "Bash") return checkBash(agent, policy, toolInput, root, base);
   if (tool === "WebFetch") return checkFetch(agent, policy, toolInput);
-  if (tool === "Task" || tool === "Agent") return checkSubagent(agent, tool, policy, toolInput, root);
+  if (tool === "Task" || tool === "Agent") return checkSubagent(agent, tool, policy, toolInput, policyRoot);
   // Any other listed tool that names a file is treated as writing it, and one that names a folder as reading it
   if (toolInput.file_path !== undefined || toolInput.notebook_path !== undefined) checkEdit(agent, policy, toolInput.file_path ?? toolInput.notebook_path, root, base);
   if (toolInput.path !== undefined) checkReadPath(agent, tool, toolInput.path, root, base);
