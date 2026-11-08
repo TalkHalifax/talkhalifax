@@ -27,7 +27,7 @@ const decode = (s: string) => s.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (m, e: s
 const summary = (html: string) => {
   const main = html.split(/<hr\s*\/?>/i)[0];
   const t = decode(main.replace(/<\/(p|li|h\d)>|<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
-  return t.length > 280 ? t.slice(0, 280).replace(/\s+\S*$/, "") + "…" : t;
+  return t.length <= 280 ? t : (t[280] === " " ? t.slice(0, 280) : t.slice(0, 280).replace(/\s+\S*$/, "")) + "…";
 };
 
 export interface LibraryEvent {
