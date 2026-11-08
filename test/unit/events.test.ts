@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Env } from "../../src/env";
-import { checkEvents, events, ingestEvents } from "../../src/events";
+import { checkEvents, events, ingestEvents, type LibraryEvent } from "../../src/events";
 import { env } from "./helpers";
 
 const e = { ...env, EVENTS_TOKEN: "right" } as Env;
@@ -12,6 +12,23 @@ const post = (body: unknown, token = "right") => ingestEvents(new Request("https
   method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body),
 }), e);
 const good = { from: "2026-11-05", to: "2026-11-19", pages: [`<rss>${item("a", soon)}${item("b", past)}${item("a", soon)}</rss>`] };
+// One upcoming item with the details under test; control items use a neutral type (Crafts) so nothing is a highlight
+const rich = (id: string, o: { title?: string; link?: string; cats?: string[]; desc?: string; place?: string; extra?: string } = {}) =>
+  `<item><title>${o.title ?? `Event ${id}`}</title><link>${o.link ?? `https://halifax.bibliocommons.com/events/${id}`}</link>
+  <bc:start_date>${soon}</bc:start_date>${(o.cats ?? ["Kids", "Crafts"]).map(c => `<category>${c}</category>`).join("")}
+  <description>${o.desc ?? "Come along."}</description>
+  <bc:location><bc:name>${o.place ?? "Central Library"}</bc:name><bc:city>Halifax</bc:city></bc:location>${o.extra ?? ""}</item>`;
+const ingestRich = async (...items: string[]) => {
+  expect((await post({ from: "2026-11-05", to: "2026-11-19", pages: [`<rss>${items.join("")}</rss>`] })).status).toBe(200);
+  const res = await events(env);
+  expect(res.status).toBe(200);
+  const list = (await res.json<{ events: LibraryEvent[] }>()).events;
+  return (id: string) => {
+    const found = list.find(x => x.id === id);
+    if (!found) throw new Error(`event ${id} not listed`);
+    return found;
+  };
+};
 
 describe("library events from the GitHub Action", () => {
   it("need the token", async () => {
@@ -40,5 +57,103 @@ describe("library events from the GitHub Action", () => {
     await expect(checkEvents(env)).resolves.toBeUndefined();
     await env.DB.prepare("UPDATE feeds SET updated_at = ? WHERE name = 'events'").bind(new Date(Date.now() - 27 * 36e5).toISOString()).run();
     await expect(checkEvents(env)).rejects.toThrow(/haven't arrived/);
+  });
+});
+
+describe("library event details", () => {
+  it("keep a cancelled event listed and mark it cancelled", async () => {
+    const get = await ingestRich(rich("c", { extra: "<bc:is_cancelled>true</bc:is_cancelled>" }), rich("n"));
+    expect(get("c").cancelled).toBe(true);
+    expect(get("n").cancelled).toBe(false);
+  });
+  it("say when registration is required, and null when there is no registration info", async () => {
+    const get = await ingestRich(rich("r", { extra: "<bc:registration_info><bc:is_required>true</bc:is_required></bc:registration_info>" }), rich("n"));
+    expect(get("r").registration).toBe("required");
+    expect(get("n").registration).toBeNull();
+  });
+  it("say full when registration is full, even when it is also required", async () => {
+    const get = await ingestRich(rich("f", { extra: "<bc:registration_info><bc:is_required>true</bc:is_required><bc:is_full>true</bc:is_full></bc:registration_info>" }));
+    expect(get("f").registration).toBe("full");
+  });
+  it("mark online events as virtual", async () => {
+    const get = await ingestRich(rich("v", { extra: "<bc:is_virtual>true</bc:is_virtual>" }), rich("n"));
+    expect(get("v").virtual).toBe(true);
+    expect(get("n").virtual).toBe(false);
+  });
+  it("make featured events highlights, whether featured overall or at their location", async () => {
+    const get = await ingestRich(
+      rich("f", { extra: "<bc:is_featured>true</bc:is_featured>" }),
+      rich("l", { extra: "<bc:is_featured_at_location>true</bc:is_featured_at_location>" }),
+      rich("n"),
+    );
+    expect(get("f")).toMatchObject({ featured: true, highlight: true });
+    expect(get("l")).toMatchObject({ featured: true, highlight: true });
+    expect(get("n")).toMatchObject({ featured: false, highlight: false });
+  });
+  it("drop the library's stock banners but keep real pictures", async () => {
+    const get = await ingestRich(
+      rich("s1", { extra: `<enclosure url="https://halifax.bibliocommons.com/images/Biblio-Events-V2-Kids.png" type="image/png" length="0"/>` }),
+      rich("s2", { extra: `<enclosure url="https://halifax.bibliocommons.com/images/storytime-events-1200x628.jpg" type="image/jpeg" length="0"/>` }),
+      rich("p", { extra: `<enclosure url="https://halifax.bibliocommons.com/uploads/photo.jpg" type="image/jpeg" length="0"/>` }),
+    );
+    expect(get("s1").image).toBeNull();
+    expect(get("s2").image).toBeNull();
+    expect(get("p").image).toBe("https://halifax.bibliocommons.com/uploads/photo.jpg");
+  });
+  it("turn http links and pictures into https, taking the id from the last path segment", async () => {
+    const get = await ingestRich(rich("h", {
+      link: "http://halifax.bibliocommons.com/events/h",
+      extra: `<enclosure url="http://halifax.bibliocommons.com/uploads/photo.jpg" type="image/jpeg" length="0"/>`,
+    }));
+    expect(get("h")).toMatchObject({ id: "h", url: "https://halifax.bibliocommons.com/events/h", image: "https://halifax.bibliocommons.com/uploads/photo.jpg" });
+  });
+  it("cut summaries over 280 characters at a word, with an ellipsis", async () => {
+    const get = await ingestRich(
+      rich("a", { desc: "x".repeat(280) }),
+      rich("b", { desc: "x".repeat(275) + " " + "longword".repeat(3) }),
+      rich("c", { desc: "abcd ".repeat(70) }),
+    );
+    expect(get("a").summary).toBe("x".repeat(280));
+    expect(get("a").summary).not.toContain("…");
+    expect(get("b").summary).toBe("x".repeat(275) + "…");
+    expect(get("c").summary).toBe(Array(56).fill("abcd").join(" ") + "…");
+    for (const id of ["b", "c"]) expect(get(id).summary.slice(0, -1).length).toBeLessThanOrEqual(280);
+  });
+  it("keep only the text before the first rule in the summary", async () => {
+    const get = await ingestRich(
+      rich("a", { desc: "<![CDATA[<p>Join us.</p><hr><p>Ages 3+</p>]]>" }),
+      rich("b", { desc: "<![CDATA[<p>Join us.</p><hr/><p>Ages 3+</p>]]>" }),
+      rich("c", { desc: "<![CDATA[<p>Join us.</p><HR /><p>Ages 3+</p>]]>" }),
+      rich("d", { desc: "<![CDATA[A<hr>B<hr>C]]>" }),
+    );
+    for (const id of ["a", "b", "c"]) expect(get(id).summary).toBe("Join us.");
+    expect(get("d").summary).toBe("A");
+  });
+  it("decode HTML entities in the title, place and summary, once, leaving unknown ones as written", async () => {
+    const get = await ingestRich(
+      rich("t", { title: "Caf&#233; &amp; Crafts &#x2014; Kids&rsquo; Night" }),
+      rich("u", { title: "Fun &foo; Day" }),
+      rich("o", { title: "Less &amp;lt; More" }),
+      rich("p", { place: "Alderney Gate &amp; Ferry" }),
+      rich("s", { desc: "<![CDATA[<p>Join &nbsp;us &nbsp; today.</p>]]>" }),
+    );
+    expect(get("t").title).toBe("Café & Crafts — Kids’ Night");
+    expect(get("u").title).toBe("Fun &foo; Day");
+    expect(get("o").title).toBe("Less &lt; More");
+    expect(get("p").place).toBe("Alderney Gate & Ferry");
+    expect(get("s").summary).toBe("Join us today.");
+  });
+  it("leave language categories out of types and audiences", async () => {
+    const get = await ingestRich(rich("l", { cats: ["Kids", "Crafts", "French", "arabic", "ASL", "Mi&#39;kmaw", "English"] }));
+    expect(get("l").types).toEqual(["Crafts"]);
+    expect(get("l").audiences).toEqual(["Kids"]);
+  });
+  it("store an event whose title has an out-of-range numeric entity, leaving the entity as written", async () => {
+    const get = await ingestRich(
+      rich("d", { title: "Big &#1114112; Night" }),
+      rich("x", { title: "Big &#x110000; Night" }),
+    );
+    expect(get("d").title).toBe("Big &#1114112; Night");
+    expect(get("x").title).toBe("Big &#x110000; Night");
   });
 });
