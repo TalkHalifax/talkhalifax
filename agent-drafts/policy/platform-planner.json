@@ -1,0 +1,9 @@
+{
+  "agent": "platform-planner",
+  "level": "L1",
+  "tools": ["Read", "Glob", "Grep"],
+  "edit": {
+    "allow": [],
+    "deny": []
+  }
+}
