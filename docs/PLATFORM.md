@@ -1,6 +1,6 @@
 # TalkHalifax: the platform as it is
 
-_A record of everything running on November 5, 2026 (Phase 6 under way). Update it when something changes._
+_A record of everything running on November 7, 2026 (Phase 6 under way). Update it when something changes._
 
 Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). The old
 `talkhalifax.alexwmmolloy.workers.dev` address redirects browsers and still serves the agents, Telegram and the Events job. Repo: github.com/TalkHalifax/talkhalifax (moved from a personal account to the TalkHalifax organization on Nov. 7, 2026).
@@ -45,8 +45,9 @@ Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). Th
 | Admin site | `admin/` | A separate Worker at `admin.talkhalifax.ca` on the same D1 database, read-only for now: Home (what needs the editor, four charts over time), Users, Content (every screen, plus sources) and Administration (job health). Behind the editor's username and password (a signed 12-hour cookie; 5 tries a minute per IP address), or Cloudflare Access if its settings are present, in which case it checks Access's signed token itself. It refuses everything until one of them is set up. It has no `workers.dev` address and never returns email addresses, password hashes, personas or Google ids |
 | Guidelines | `newsroom/guidelines.md` | How stories are written; bundled into the Worker and served by `get_guidelines` |
 | Schema | `migrations/0001`–`0013` | D1 tables (below) |
-| Tests | `test/unit/`, `test/e2e/routes.mjs` | `npm test`: the rules on the Workers runtime (screening, timing, approvals, bans, rate limits, events). `npm run test:e2e`: every page and story kind in a browser, with throwaway data |
-| Deploy | `.github/workflows/deploy.yml` | Every push to `main`: type check, unit tests and a browser check (any failure stops the deploy), D1 migrations, `wrangler deploy`, a smoke test, and a rollback if it fails. Then the admin Worker, and a check that it refuses anyone who hasn't signed in |
+| Tests | `test/unit/`, `test/e2e/routes.mjs`, `test/hooks/` | `npm test`: the rules on the Workers runtime (screening, timing, approvals, bans, rate limits, events). `npm run test:e2e`: every page and story kind in a browser, with throwaway data. `npm run test:hooks`: the agent guard against sample policies in `test/hooks/fixtures/` |
+| Agent guard | `.claude/hooks/agent-guard.mjs`, `.claude/settings.json`, `.claude/agents/policy/` | Holds each agent that has a policy file to that policy (below) |
+| Deploy | `.github/workflows/deploy.yml` | Every push to `main` (which now arrives only by a merged pull request): type check, unit tests, agent guard tests and a browser check (any failure stops the deploy; pull requests run these as the `check` job), D1 migrations, `wrangler deploy`, a smoke test, and a rollback if it fails. Then the admin Worker, and a check that it refuses anyone who hasn't signed in |
 
 ## Content model
 
@@ -134,6 +135,37 @@ On the admin Worker (`--config admin/wrangler.jsonc`): `ADMIN_USER` and `ADMIN_P
 GitHub repository secrets: `CLOUDFLARE_API_TOKEN` (Workers Scripts Edit, D1 Edit; it also covers the Workers AI binding) and `EVENTS_TOKEN` (the Events workflow).
 Cloud routines: environment variable `TALKHALIFAX_TOKEN` (the newsroom token) and network access to the site.
 
+## The repo, `main` and the agent guard
+
+**`main` is protected** by a GitHub ruleset (set Nov. 7, 2026, in the repo's settings rather than in files): every change needs a pull request, the `check` job must pass, nobody can bypass it, and force pushes and deleting `main` are refused. The Transit job's direct push to `main` is refused too until it changes (TECH-DEBT **D8**).
+
+**`.github/CODEOWNERS`** names the editor as owner of every file. The ruleset doesn't require code-owner review yet, because agents act under the editor's GitHub account (TECH-DEBT **C11**).
+
+**The agent guard** (`.claude/hooks/agent-guard.mjs`) is a `PreToolUse` hook, registered in `.claude/settings.json`, that runs before every tool call in Claude Code. It runs outside the model, so an agent can't talk past it. It only acts on a subagent with a policy file, `.claude/agents/policy/<name>.json`; the editor's own session and the build agents (no policy file) are unaffected. No agent has a policy yet. For an agent that has one, it checks:
+
+- the tool is in the policy's list (PowerShell is always refused);
+- edits stay inside the policy's allowed paths, and reads stay inside the repo;
+- each Bash command is one plain command that matches an allowed pattern, token for token;
+- WebFetch goes over https to an allowed domain;
+- `Task`/`Agent` start only agents the policy names that have a policy of their own.
+
+Whatever a policy says, it refuses:
+- edits to anything under `.claude/`, `.github/`, `CLAUDE.md`, `migrations/`, `package.json`, `scripts/`, the test and build config, and the code that allowed commands run in plain Node;
+- reading secret files (`.dev.vars`, `.env`, `.newsroom-token`, `.wrangler/` and similar);
+- git subcommands outside a short allowlist (status, diff, log, show, add, commit, branch, push and a few more);
+- pushes to `main`, force pushes and deletes, and merging pull requests;
+- wrangler beyond `dev` (with a short list of flags), `types` and local `d1`, so no deploys, secrets or live database.
+
+**Agents are changed through drafts.** Agent Operations drafts definitions and policies in `agent-drafts/`, which nothing loads. The reviewer commits them and opens a pull request. The editor reviews it, runs `npm run agents:promote` on the branch, then pushes and merges.
+
+The promote script (`scripts/promote-agent-drafts.mjs`) needs a clean working tree and moves nothing unless every draft passes. It checks:
+- every policy, with the guard's own validator;
+- that each definition has a matching policy;
+- each definition's front matter: only `name`, `description`, `tools`, `model`, `color`, `effort` and `maxTurns`, with one `name:` equal to the file name, a `tools:` line, no duplicate keys, and no nested lines beyond a list of tools. `hooks`, `mcpServers`, `permissionMode`, `skills` and every other key are refused;
+- that every tool the definition lists is in its policy's `tools`.
+
+It then moves the drafts into `.claude/agents/` with `git mv`. No policy agent can run the promote script, or draft its own files, the orchestrator's or Agent Operations' (`agent-ops-*`). A policy file that is broken or has an unknown key refuses every tool. The policy format and the full list are in [`.claude/agents/policy/README.md`](../.claude/agents/policy/README.md). Tests: `npm run test:hooks`, run by CI in the `check` job.
+
 ## Web security settings
 
 **Set on the three Cloudflare zones** (`talkhalifax.ca`, `.com`, `.org`), in the dashboard rather than this repo: Always Use HTTPS, minimum TLS 1.2, HSTS (6 months, no subdomains, no preload), DMARC `p=reject` on all three, SPF `-all` on `.com` and `.org`, and DNSSEC turned on. Bot Fight Mode is deliberately off.
@@ -163,4 +195,5 @@ See [OPERATING-MODEL.md](OPERATING-MODEL.md) for what each one does. Debt and ga
   usually missing. The journalist reports it and carries on.
 - **The library's events feed refuses requests from Cloudflare** (HTTP 403), so GitHub Actions fetches it (TECH-DEBT
   **E1**). If that workflow stops, the Events tab keeps its last list and the cron warns after 26 hours.
+- **The Transit job can't push to `main`** under the ruleset (TECH-DEBT **D8**). The next time Halifax Transit starts a new schedule, the job will fail at the push and the map keeps the old data until it changes.
 - Cron expressions are in UTC, so routines run an hour later in Halifax local time from November to March.

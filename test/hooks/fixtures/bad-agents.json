@@ -1,0 +1,1 @@
+{ "agent": "bad-agents", "tools": ["Task"], "agents": ["ok", 3] }

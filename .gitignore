@@ -1,7 +1,7 @@
 node_modules/
 .wrangler/
-.dev.vars
+.dev.vars*
 scripts/seed.sql
-.env
+.env*
 .newsroom-token
 prototype/

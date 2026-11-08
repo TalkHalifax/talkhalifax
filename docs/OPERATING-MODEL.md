@@ -1,6 +1,6 @@
 # TalkHalifax operating model
 
-_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram._
+_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram. Last updated November 7, 2026._
 
 ## The team
 
@@ -16,7 +16,8 @@ One human and a set of agents. Agents do the watching, writing, checking and rep
 - Handles reports, bans and reset links on the site.
 - Reads two briefings a day. Changes the guidelines and the agents' jobs.
 - Can see members, content, charts and job health on the admin site (`admin.talkhalifax.ca`). It's read-only for now, so approvals stay on Telegram and moderation stays on the site.
-- Approves every push to `main` (each one deploys).
+- Reviews and merges every pull request into `main` (each merge deploys). `main` takes changes only through pull requests.
+- Approves every change to the agent guard and the agents' policies (`.claude/hooks/`, `.claude/settings.json`, `.claude/agents/policy/`).
 
 ### Newsroom agents (cloud routines, autonomous)
 
@@ -51,6 +52,22 @@ Defined in [`.claude/agents/`](../.claude/agents/). They help build and change t
 | `security-reviewer` | Auth, moderation, privacy and anything that handles user data |
 | `standards-keeper` | `newsroom/guidelines.md` and the routine prompts: clear, consistent, enforceable |
 | `docs-keeper` | Keeps `docs/`, `README.md` and `CLAUDE.md` true to the code |
+
+### The agent organization (starting)
+
+TalkHalifax is starting an organization of agents: teams, each agent with a written policy of what it may edit and
+run. The charters and profiles are the editor's working notes, kept outside the repo. The repo holds what agents
+actually follow: their definitions in `.claude/agents/` and their policies in `.claude/agents/policy/`.
+
+- **The agent guard** enforces each policy before every tool call, outside the model. An agent can't edit outside its
+  paths, run a command its policy doesn't list, push to `main`, merge a pull request, deploy or touch secrets. See
+  [PLATFORM.md](PLATFORM.md#the-repo-main-and-the-agent-guard).
+- **No policy file, no guard.** The editor's own session and the build agents above work as before.
+- **Agents are changed through drafts.** No agent edits anything under `.claude/`. Agent Operations drafts a definition
+  and its policy in `agent-drafts/`, and the reviewer commits them and opens a pull request. The editor reviews it,
+  runs `npm run agents:promote` on the branch to move the drafts into `.claude/agents/`, then pushes and merges. No
+  agent drafts its own files, the orchestrator's or Agent Operations' own (`agent-ops-*`).
+- **Work reaches the site only through a pull request** that passes the `check` job and that the editor merges.
 
 ## A day in the newsroom
 

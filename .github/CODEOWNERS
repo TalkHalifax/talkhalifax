@@ -1,0 +1,5 @@
+# The editor owns every file. No pull request merges without the editor's review.
+# Agents never edit this file; the agent guard (.claude/hooks/agent-guard.mjs) refuses it.
+# See the Global charter in Notion (Agent Organization), sections 5 and 7.
+
+* @Synxpsis

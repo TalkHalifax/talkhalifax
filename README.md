@@ -34,9 +34,10 @@ Open http://localhost:8787, then the profile icon, then **Dev sign-in** (it's en
 ```bash
 npm test           # the rules, on the Workers runtime (test/unit/)
 npm run test:e2e   # the real site in Chrome or Edge: every page and every kind of story (test/e2e/)
+npm run test:hooks # the agent guard against sample policies (test/hooks/)
 ```
 
-Neither needs a Cloudflare account or touches the live site. CI runs both before every deploy, and a failure stops the deploy.
+None of them needs a Cloudflare account or touches the live site. CI runs all three on every pull request and before every deploy, and a failure stops the deploy.
 
 ## Deploy
 
