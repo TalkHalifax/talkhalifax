@@ -9,7 +9,9 @@
     "SendMessage",
     "Agent",
     "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-search",
-    "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-fetch"
+    "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-fetch",
+    "mcp__claude_ai_Notion__notion-search",
+    "mcp__claude_ai_Notion__notion-fetch"
   ],
   "edit": {
     "allow": [],
@@ -17,11 +19,16 @@
   },
   "bash": [
     ["git", "status"],
+    ["git", "status", "--short"],
     ["git", "diff"],
+    ["git", "diff", "--stat"],
+    ["git", "diff", "main...HEAD"],
+    ["git", "diff", "--stat", "main...HEAD"],
     ["git", "log", "--oneline", "-20"],
     ["git", "push", "-u", "origin", "re:^events/[a-z0-9._-]+$"],
     ["gh", "pr", "create", "--base", "main", "--head", "re:^events/[a-z0-9._-]+$", "--title", "*", "--body", "*"],
-    ["gh", "pr", "view", "*"]
+    ["gh", "pr", "view", "*"],
+    ["gh", "pr", "checks", "*"]
   ],
   "agents": ["events-planner", "events-builder", "events-reviewer"]
 }
