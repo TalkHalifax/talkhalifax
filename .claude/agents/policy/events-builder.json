@@ -1,0 +1,25 @@
+{
+  "agent": "events-builder",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch"],
+  "edit": {
+    "allow": ["src/events.ts", "public/events.js", "test/unit/events.test.ts"],
+    "deny": []
+  },
+  "bash": [
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "checkout", "-b", "re:^events/[a-z0-9._-]+$"],
+    ["git", "add", "src/events.ts"],
+    ["git", "add", "public/events.js"],
+    ["git", "add", "test/unit/events.test.ts"],
+    ["git", "commit", "-m", "*"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
+}
