@@ -119,6 +119,46 @@ describe("library event details", () => {
     expect(get("c").summary).toBe(Array(56).fill("abcd").join(" ") + "…");
     for (const id of ["b", "c"]) expect(get(id).summary.slice(0, -1).length).toBeLessThanOrEqual(280);
   });
+  it("keep a word that ends exactly at character 280, and cut hard when there is no space", async () => {
+    // The full plain text of each cut item, after tags, entities and whitespace are dealt with
+    const plain: Record<string, string> = {
+      end: "x".repeat(275) + " abcd more text",
+      sp: "x".repeat(279) + " " + "y".repeat(30),
+      hard: "x".repeat(300),
+      hardsp: "x".repeat(280) + " tail",
+      one: "a " + "x".repeat(300),
+      ent: "x".repeat(274) + " &&&&& tail",
+      tags: "x".repeat(275) + " abcd more",
+    };
+    const get = await ingestRich(
+      rich("end", { desc: plain.end }),
+      rich("sp", { desc: plain.sp }),
+      rich("hard", { desc: plain.hard }),
+      rich("hardsp", { desc: plain.hardsp }),
+      rich("one", { desc: plain.one }),
+      rich("short", { desc: "x".repeat(279) }),
+      rich("ent", { desc: "x".repeat(274) + " &amp;&amp;&amp;&amp;&amp; tail" }),
+      rich("tags", { desc: `<![CDATA[${"x".repeat(275)}\n\n  <br>abcd   more]]>` }),
+    );
+    expect(get("end").summary, "end").toBe("x".repeat(275) + " abcd…");
+    expect(get("sp").summary, "sp").toBe("x".repeat(279) + "…");
+    expect(get("hard").summary, "hard").toBe("x".repeat(280) + "…");
+    expect(get("hardsp").summary, "hardsp").toBe("x".repeat(280) + "…");
+    expect(get("one").summary, "one").toBe("a…");
+    expect(get("short").summary, "short").toBe("x".repeat(279));
+    expect(get("short").summary, "short").not.toContain("…");
+    expect(get("ent").summary, "ent").toBe("x".repeat(274) + " &&&&&…");
+    expect(get("tags").summary, "tags").toBe("x".repeat(275) + " abcd…");
+    for (const id of Object.keys(plain)) {
+      const s = get(id).summary, head = s.slice(0, -1);
+      expect(s.endsWith("…"), id).toBe(true);
+      expect(head.endsWith("…"), id).toBe(false);
+      expect(head.length, id).toBeGreaterThanOrEqual(1);
+      expect(head.length, id).toBeLessThanOrEqual(280);
+      expect(head.endsWith(" "), id).toBe(false);
+      expect(plain[id].startsWith(head), id).toBe(true);
+    }
+  });
   it("keep only the text before the first rule in the summary", async () => {
     const get = await ingestRich(
       rich("a", { desc: "<![CDATA[<p>Join us.</p><hr><p>Ages 3+</p>]]>" }),
