@@ -1,6 +1,6 @@
 # TalkHalifax design system
 
-_The rules the site is built on. The tokens live in `:root` at the top of `public/index.html`; this file explains them.
+_The rules the site is built on. The tokens live in `:root` at the top of `public/styles.css`; this file explains them.
 Change a token there, not a colour in a rule._
 
 ## The idea
