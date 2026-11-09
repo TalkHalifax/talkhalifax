@@ -43,11 +43,10 @@ hour later in local time.
 ### Build agents (local, working with the editor in Claude Code)
 
 Defined in [`.claude/agents/`](../.claude/agents/). They help build and change the platform; they don't run on their own.
+`engineer` and `designer` were retired on Nov. 8, 2026; Platform Core and Site & Design System replace them.
 
 | Agent | For |
 |---|---|
-| `engineer` | Worker, D1, Durable Objects, MCP tools, migrations |
-| `designer` | The design system, layouts and the mobile and desktop experience |
 | `qa-tester` | End-to-end checks against `wrangler dev`, in the browser and by script |
 | `security-reviewer` | Auth, moderation, privacy and anything that handles user data |
 | `standards-keeper` | `newsroom/guidelines.md` and the routine prompts: clear, consistent, enforceable |
@@ -106,7 +105,7 @@ does nothing. Keep it on.
 - **The site or a tool is down:** site reliability says so. Check the GitHub Actions deploy and Cloudflare logs
   (`npx wrangler tail`).
 - **A source stops working** (a feed changes shape, a 403 or 429): the journalist reports it in its summary and site
-  reliability flags it. It needs a code change: open it with the `engineer` agent.
+  reliability flags it. It needs a code change: brief the team that owns the source.
 - **Harmful chat:** screening stops most of it. Reports arrive on Telegram; remove and ban from the site.
 - **An agent misbehaves:** pause its routine at claude.ai/code/routines, read its run log, fix its prompt file.
 
