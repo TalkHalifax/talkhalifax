@@ -1,4 +1,4 @@
-/* The admin site, on the main site's design tokens (docs/DESIGN-SYSTEM.md). Keep the tokens in step with public/index.html. */
+/* The admin site, on the main site's design tokens (docs/DESIGN-SYSTEM.md). Keep the tokens in step with public/styles.css. */
 :root {
   --surface-page: #f5f6f7; --surface-solid: #ffffff; --surface-sunken: #eef0f2; --surface-glass: rgba(255, 255, 255, 0.62);
   --edge-glass: rgba(18, 20, 23, 0.07); --line: #e3e5e8; --ink: #121417; --ink-muted: #5b6168; --on-ink: #ffffff;

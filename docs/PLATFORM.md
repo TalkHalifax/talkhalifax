@@ -18,7 +18,7 @@ Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). Th
  Signals (never facts): ├──► Workers AI (Llama Guard screens chat and comments)
  Google Trends,         └──► Telegram bot ──► the editor (approve / discard, notes)
  r/halifax              ▼
-                   public/index.html + app.js (single-page site, served as static assets)
+                   public/index.html + styles.css + app.js modules (single-page site, static assets)
 
  Halifax Public Libraries ──► GitHub Action (every 6 hours) ──► POST /api/events/ingest
 ```
@@ -37,7 +37,7 @@ Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). Th
 | Telegram | `src/telegram.ts` | Drafts and held updates to the editor with buttons; plain notes |
 | Weather | `src/weather.ts` | Environment Canada's current conditions for the small line in the header and phone menu. Wind chill and humidex are used only when they apply at that temperature, because the feed can carry stale values |
 | Weather warnings | `src/alerts.ts` | Environment Canada warnings, watches and statements for the banners, Notices and `conditions` |
-| Site | `public/index.html`, `public/app.js` | The page, CSS design system and all views (see [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md)) |
+| Site | `public/index.html`, `public/styles.css`, `public/app.js`, `public/api.js`, `public/chat.js`, `public/views/` | The page and the CSS design system (`styles.css`, see [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md)). `app.js` is an ES module with the shared helpers, state and routing; `api.js` fetches from `/api`, `chat.js` runs the live chat, and `views/` has one module per view (`home`, `articles`, `notices`, `article`, `moderation`, `user`, `reset`, `profile`). No bundler. The service worker caches every one of these files for offline use: add a new module to `SHELL_FILES` in `sw.js` and bump `VERSION` |
 | Transit map | `src/transit.ts`, `public/transit.js`, `scripts/build-transit.mjs` | Live buses and ferries and service alerts from Halifax Transit's GTFS-realtime feeds; route lines and names from its GTFS schedule |
 | Events | `src/events.ts`, `public/events.js` | The Events tab: Halifax Public Libraries' events for the next two weeks, stored in `feeds` ('events') and shown as the library lists them. The feed refuses Cloudflare, so a GitHub Action (`.github/workflows/events.yml`, started every 6 hours by the Worker's cron, `src/github-jobs.ts`) runs `scripts/fetch-events.mjs`, which posts the raw RSS pages to `POST /api/events/ingest` (Bearer `EVENTS_TOKEN`); the Worker parses and stores them |
 | Push alerts | `src/push.ts`, `public/alerts.js` | Readers opt in from the Alerts section of their profile, no account needed (kinds, quiet hours; `/#alerts` links land there). A new live notice offers the editor "Send alert" on Telegram; only that tap sends. Web Push with VAPID and aes128gcm, done with WebCrypto |
