@@ -5,7 +5,8 @@ Halifax news, rewritten as short articles with a live chat in each one. Runs on 
 **Docs:** [vision](docs/VISION.md) · [the platform today](docs/PLATFORM.md) · [operating model and agents](docs/OPERATING-MODEL.md) · [design system](docs/DESIGN-SYSTEM.md) · [roadmap](docs/ROADMAP.md) · [tech debt](docs/TECH-DEBT.md) · [working rules for agents](CLAUDE.md)
 
 - `public/`: the page (`index.html`, `app.js`), served as static assets
-- `src/index.ts`: the Worker: `/api/*`, `/auth/*`, `/rooms/<story>/ws`, and a 30-minute cron for weather and weather warnings, story stages and clean-up
+- `src/index.ts`: the Worker: routing for `/api/*`, `/auth/*` and `/rooms/<story>/ws`, security headers, and a 30-minute cron for weather and weather warnings, story stages and clean-up
+- `src/routes/`: the site's own `/api/*` handlers, one module per area (`me`, `stories`, `users`, `reports`, `mod-tools`, `comments`, `review`, `page-stats`), called in order by `src/index.ts`
 - `src/alerts.ts`: Environment Canada weather warnings for the banners and Notices, shown as posted with links (not rewritten)
 - `src/transit.ts` and `public/transit.js`: the live Transit map (Halifax Transit's real-time feeds). A GitHub Action (`.github/workflows/transit.yml`) rebuilds the map's data once Halifax Transit's new schedule starts, and deploys it
 - `src/events.ts` and `public/events.js`: the Events tab, from Halifax Public Libraries' events feed (the next two weeks). The feed refuses Cloudflare, so [.github/workflows/events.yml](.github/workflows/events.yml) runs `scripts/fetch-events.mjs` every 6 hours, started by the Worker's cron, and posts it to the site
