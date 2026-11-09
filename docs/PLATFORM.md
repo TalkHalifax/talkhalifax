@@ -1,6 +1,6 @@
 # TalkHalifax: the platform as it is
 
-_A record of everything running on November 7, 2026 (Phase 6 under way). Update it when something changes._
+_A record of everything running on November 8, 2026 (Phase 6 under way). Update it when something changes._
 
 Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). The old
 `talkhalifax.alexwmmolloy.workers.dev` address redirects browsers and still serves the agents, Telegram and the Events job. Repo: github.com/TalkHalifax/talkhalifax (moved from a personal account to the TalkHalifax organization on Nov. 7, 2026).
@@ -25,7 +25,8 @@ Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). Th
 
 | Part | Where | What it does |
 |---|---|---|
-| Worker | `src/index.ts` | Routes, the 30-minute cron (current weather, weather warnings, a check on the Transit schedule's end date, a check that library events are arriving, story stages, clean-up) |
+| Worker | `src/index.ts` | Routing (`/api/*`, `/auth/*`, chat rooms, the newsroom and Telegram), security headers, the 30-minute cron (current weather, weather warnings, a check on the Transit schedule's end date, a check that library events are arriving, story stages, clean-up) |
+| API routes | `src/routes/` | The site's own `/api/*` handlers, one module per area: `me` (your account, your messages, deleting it), `stories`, `users` (public profiles), `reports`, `mod-tools` (bans, reset links), `comments`, `review` (held drafts, moving stories between stages), `page-stats`. `story-rows.ts` holds the shared story query. `src/index.ts` tries them in order, with the hand-offs to weather, alerts, Transit, events, push and the newsroom between `page-stats` and `comments` |
 | Auth | `src/auth.ts` | Password and Google sign-in, sessions (HttpOnly cookie), Turnstile, reset links, rate limits |
 | Halifax Water | `src/halifax-water.ts` | Reads its listing pages (it has no feed), sets how soon each is worked (on the site, only a boil-water advisory pins to Home), and strips the site-wide banner from its pages |
 | Stories | `src/stories.ts` | Saving stories and versions, Developing → Articles, comments, approvals |

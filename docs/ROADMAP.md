@@ -1,6 +1,6 @@
 # TalkHalifax: roadmap
 
-_Last updated November 7, 2026. [VISION.md](VISION.md) says why, this file says what's next and in what order,
+_Last updated November 8, 2026. [VISION.md](VISION.md) says why, this file says what's next and in what order,
 and [TECH-DEBT.md](TECH-DEBT.md) has the items marked like **N1**._
 
 The order follows the principles: first keep facts right, then keep the site up, then make it feel native, then grow.
@@ -33,7 +33,8 @@ features land on a codebase that can take them.
 **6a. Ground work**
 - ✅ Turnstile keys set by the editor, so sign-up has a bot check (**D3**, Nov. 6).
 - ✅ Upgrade wrangler, workers-types and the compatibility date (**C3**).
-- Split `app.js` into modules and move the CSS to its own file, no bundler (**C4**).
+- Split `app.js` into modules and move the CSS to its own file, no bundler (**C4**). The server half is done: the
+  `/api/*` handlers moved to `src/routes/` (Nov. 8).
 - ✅ First automated tests: screening rules, check-in and stage timing, pending updates, bans and rate limits, run in CI
   before deploy (**C1**, first slice).
 - ✅ Security headers on every response, with the content policy report-only (Nov. 7). Switch it on after a few quiet
