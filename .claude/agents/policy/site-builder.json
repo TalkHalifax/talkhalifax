@@ -1,7 +1,7 @@
 {
   "agent": "site-builder",
   "level": "L2",
-  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch"],
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
   "edit": {
     "allow": [
       "public/app.js",

@@ -6,6 +6,7 @@
     "Glob",
     "Grep",
     "Bash",
+    "Write",
     "SendMessage",
     "Agent",
     "mcp__ef0c699a-de02-4fc2-8170-8671384562b0__notion-search",
@@ -14,7 +15,7 @@
     "mcp__claude_ai_Notion__notion-fetch"
   ],
   "edit": {
-    "allow": [],
+    "allow": ["briefs/*-report.md"],
     "deny": []
   },
   "bash": [
