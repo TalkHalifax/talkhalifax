@@ -48,7 +48,7 @@ Live at https://talkhalifax.ca (`talkhalifax.com` and `.org` redirect there). Th
 | Schema | `migrations/0001`–`0013` | D1 tables (below) |
 | Tests | `test/unit/`, `test/e2e/routes.mjs`, `test/hooks/` | `npm test`: the rules on the Workers runtime (screening, timing, approvals, bans, rate limits, events). `npm run test:e2e`: every page and story kind in a browser, with throwaway data. `npm run test:hooks`: the agent guard against sample policies in `test/hooks/fixtures/` |
 | Agent guard | `.claude/hooks/agent-guard.mjs`, `.claude/settings.json`, `.claude/agents/policy/` | Holds each agent that has a policy file to that policy (below) |
-| Deploy | `.github/workflows/deploy.yml` | Every push to `main` (which now arrives only by a merged pull request): type check, unit tests, agent guard tests and a browser check (any failure stops the deploy; pull requests run these as the `check` job), D1 migrations, `wrangler deploy`, a smoke test, and a rollback if it fails. Then the admin Worker, and a check that it refuses anyone who hasn't signed in |
+| Deploy | `.github/workflows/deploy.yml` | Every push to `main` (which now arrives only by a merged pull request): type check, unit tests, agent guard tests, a check that no protected drafts are left unpromoted, and a browser check (any failure stops the deploy; pull requests run these as the `check` job), D1 migrations, `wrangler deploy`, a smoke test, and a rollback if it fails. Then the admin Worker, and a check that it refuses anyone who hasn't signed in |
 
 ## Content model
 
@@ -166,6 +166,8 @@ The promote script (`scripts/promote-agent-drafts.mjs`) needs a clean working tr
 - that every tool the definition lists is in its policy's `tools`.
 
 It then moves the drafts into `.claude/agents/` with `git mv`. No policy agent can run the promote script, or draft its own files, the orchestrator's or Agent Operations' (`agent-ops-*`). A policy file that is broken or has an unknown key refuses every tool. The policy format and the full list are in [`.claude/agents/policy/README.md`](../.claude/agents/policy/README.md). Tests: `npm run test:hooks`, run by CI in the `check` job.
+
+**Protected files are changed through drafts too.** The guard refuses `migrations/`, `package.json`, `test/e2e/`, the wrangler configs, `.github/` and `scripts/` to every agent. A team that owns one writes its change under `protected-drafts/` at the same path (`protected-drafts/test/e2e/routes.mjs` becomes `test/e2e/routes.mjs`), as far as its policy's `edit.allow` grants draft paths. Nothing loads that folder. Once the editor approves the pull request, the orchestrator or the editor runs `npm run drafts:promote` (`scripts/promote-protected-drafts.mjs`) on its branch. It moves each draft into place with `git mv`, only to an allowlisted target (`test/e2e/`, new `migrations/NNNN_name.sql`, `package.json`, the wrangler configs, `.github/workflows/*.yml`, `scripts/*.mjs`), and refuses `.claude/`, `CLAUDE.md`, secrets, the promote scripts, the scripts that set secrets, and any existing migration. CI fails if `main` holds any draft besides the README. `tsconfig*.json` and `vitest.config.*` can't be drafted; the orchestrator changes them on the editor's approval. Details in [`protected-drafts/README.md`](../protected-drafts/README.md).
 
 ## Web security settings
 

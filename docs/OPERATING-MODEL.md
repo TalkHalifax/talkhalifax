@@ -67,6 +67,10 @@ actually follow: their definitions in `.claude/agents/` and their policies in `.
   and its policy in `agent-drafts/`, and the reviewer commits them and opens a pull request. The editor reviews it,
   runs `npm run agents:promote` on the branch to move the drafts into `.claude/agents/`, then pushes and merges. No
   agent drafts its own files, the orchestrator's or Agent Operations' own (`agent-ops-*`).
+- **Protected files are changed through drafts as well.** A team that owns a file the guard refuses to every agent
+  (migrations, `package.json`, `test/e2e/`, wrangler configs, workflows, scripts) drafts it in `protected-drafts/`.
+  When the editor approves the pull request, the orchestrator runs `npm run drafts:promote` to move it into place.
+  See [`protected-drafts/README.md`](../protected-drafts/README.md).
 - **Work reaches the site only through a pull request** that passes the `check` job and that the editor merges.
 
 ## A day in the newsroom

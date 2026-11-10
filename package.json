@@ -12,8 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "node test/e2e/routes.mjs",
-    "test:hooks": "node --test test/hooks/agent-guard.test.mjs test/hooks/agent-guard-worktrees.test.mjs test/hooks/promote-agent-drafts.test.mjs",
-    "agents:promote": "node scripts/promote-agent-drafts.mjs"
+    "test:hooks": "node --test test/hooks/agent-guard.test.mjs test/hooks/agent-guard-worktrees.test.mjs test/hooks/promote-agent-drafts.test.mjs test/hooks/promote-protected-drafts.test.mjs",
+    "agents:promote": "node scripts/promote-agent-drafts.mjs",
+    "drafts:promote": "node scripts/promote-protected-drafts.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.6.0",

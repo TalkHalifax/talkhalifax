@@ -70,6 +70,11 @@ Unknown keys are refused, so a typo can't silently drop a rule.
   and that agent needs a policy file of its own.
 - `edit`: for Edit, Write and NotebookEdit. Repo-relative paths with forward slashes; `*` stays within one folder,
   `**` spans any depth. `deny` wins over `allow`; no `allow` means no edits. Paths outside the repo are refused.
+  A file the guard refuses to every agent (`migrations/`, `package.json`, `test/e2e/`, wrangler configs, `.github/`,
+  `scripts/`) can't be granted, but its draft path can, for example `protected-drafts/test/e2e/**`. The orchestrator
+  promotes drafts once the editor approves the pull request (see
+  [`protected-drafts/README.md`](../../../protected-drafts/README.md)). `tsconfig*.json` and `vitest.config.*` are
+  refused anywhere, `protected-drafts/` included.
 - Reads (Read, Grep, Glob, LS, and any tool given a `path`) must stay inside the repo, after following links.
   Relative paths resolve against the session's folder, as the tools do. "The repo" is the main checkout, unless the
   session runs in a genuine linked worktree at `.claude/worktrees/<name>/` (Claude Code desktop does this). Then it
