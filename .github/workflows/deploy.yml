@@ -35,7 +35,7 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
       - name: Client script parses
-        run: for f in public/app.js public/api.js public/chat.js public/views/*.js public/stats.js admin/public/admin.js; do node --check "$f"; done
+        run: for f in public/app.js public/api.js public/chat.js public/views/*.js public/events.js public/alerts.js public/transit.js public/stats.js admin/public/admin.js; do node --check "$f"; done
       - name: Type check the tests
         run: npx tsc -p test
       - name: Unit tests
