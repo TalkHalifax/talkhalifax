@@ -4,6 +4,14 @@
 (function () {
   "use strict";
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Feed links and pictures are untrusted: only absolute https URLs reach an href or a CSS url('...')
+  const LIBRARY_EVENTS = "https://halifax.bibliocommons.com/v2/events";
+  const safeLink = s => {
+    if (typeof s !== "string" || !/^https:\/\//i.test(s)) return null;
+    try { return new URL(s).protocol === "https:" ? s : null; } catch (e) { return null; }
+  };
+  const safeImage = s => typeof s !== "string" || /['"()\\\s]/.test(s) ? null : safeLink(s);
+  const href = u => esc(safeLink(u) || safeLink(data?.sourceUrl) || LIBRARY_EVENTS);
   const MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const WHEN = [["today", "Today"], ["weekend", "This weekend"], ["week", "This week"], ["all", "Next two weeks"]];
@@ -58,7 +66,7 @@
   function highlights(list) {
     const seen = new Set();
     return list.filter(e => e.highlight && !e.cancelled)
-      .sort((a, b) => Number(b.featured) - Number(a.featured) || Number(!!b.image) - Number(!!a.image) || a.start.localeCompare(b.start))
+      .sort((a, b) => Number(b.featured) - Number(a.featured) || Number(!!safeImage(b.image)) - Number(!!safeImage(a.image)) || a.start.localeCompare(b.start))
       .filter(e => !seen.has(e.title) && seen.add(e.title)).slice(0, 6)
       .sort((a, b) => a.start.localeCompare(b.start));
   }
@@ -86,8 +94,9 @@
   }
 
   function card(e) {
-    return `<button type="button" class="card glass ev-card${e.image ? " pic" : ""}" data-open="${esc(key(e))}">
-      ${e.image ? `<span class="ev-img" style="background-image:url('${esc(e.image)}')" role="img" aria-label=""></span>` : ""}
+    const img = safeImage(e.image);
+    return `<button type="button" class="card glass ev-card${img ? " pic" : ""}" data-open="${esc(key(e))}">
+      ${img ? `<span class="ev-img" style="background-image:url('${esc(img)}')" role="img" aria-label=""></span>` : ""}
       <span class="k">${esc(shortDay(e.startLocal.slice(0, 10)))} · ${esc(clock(e.startLocal))}</span>
       <span class="tt">${esc(e.title)}</span>
       <span class="dk">${esc(e.summary)}</span>
@@ -109,7 +118,7 @@
         <p class="ev-when">${esc(dayLabel(e.startLocal.slice(0, 10)).replace(/^(Today|Tomorrow) · /, ""))}, ${esc(span(e))}${e.room ? ` · ${esc(e.room)}` : ""}</p>
         ${e.summary ? `<p>${esc(e.summary)}</p>` : ""}
         ${e.types.length ? `<p class="ev-types">${e.types.map(esc).join(" · ")}</p>` : ""}
-        <a class="ev-link" href="${esc(e.url)}" target="_blank" rel="noopener">Details${e.registration ? " and registration" : ""} on the library's site ↗</a>
+        <a class="ev-link" href="${href(e.url)}" target="_blank" rel="noopener">Details${e.registration ? " and registration" : ""} on the library's site ↗</a>
       </div>` : ""}
     </li>`;
   }
@@ -127,7 +136,7 @@
     html += days.size
       ? [...days].map(([d, es]) => `<h2 class="ev-day">${esc(dayLabel(d))}<span>${es.length} event${es.length === 1 ? "" : "s"}</span></h2><ul class="ev-list">${es.map(row).join("")}</ul>`).join("")
       : `<div class="msg">Nothing listed for ${F.when === "today" ? "the rest of today" : "these dates"}${F.who !== "all" || F.area ? " with these filters" : ""}. Try another day${F.who !== "all" || F.area ? " or fewer filters" : ""}.</div>`;
-    html += `<p class="forum-foot">Listed as <a href="${esc(data.sourceUrl)}" target="_blank" rel="noopener">Halifax Public Libraries</a> posts them, updated ${esc(ago(data.updatedAt))}. Check the library's page before you go: times and registration can change.</p>`;
+    html += `<p class="forum-foot">Listed as <a href="${href(data.sourceUrl)}" target="_blank" rel="noopener">Halifax Public Libraries</a> posts them, updated ${esc(ago(data.updatedAt))}. Check the library's page before you go: times and registration can change.</p>`;
     root.innerHTML = html;
   }
 

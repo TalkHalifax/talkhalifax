@@ -6,6 +6,7 @@
 import { Env, json } from "./env";
 
 const MAX_PAGES = 40, MAX_PAGE_BYTES = 1_000_000, STALE_MS = 26 * 36e5;
+const SOURCE_URL = "https://halifax.bibliocommons.com/v2/events";
 const AUDIENCES = ["Preschoolers", "Kids", "Teens", "Adults", "All Ages"];
 const LANGUAGES = /^(English|French|Arabic|Spanish|Mandarin|Cantonese|Persian|Farsi|Ukrainian|Hindi|Punjabi|Tagalog|Korean|Portuguese|ASL|Mi'kmaw|Gaelic)$/i;
 // The library's stock banner for each event type isn't a picture of the event, so it doesn't count as an image
@@ -23,6 +24,13 @@ const decode = (s: string) => s.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (m, e: s
   // An out-of-range code point (past U+10FFFF) can't be decoded, so it stays as written
   return n <= 0x10ffff ? String.fromCodePoint(n) : m;
 });
+/** The string as given when it's an absolute https URL, else null (feed links are untrusted). */
+const safeLink = (s: string): string | null => {
+  if (!/^https:\/\//i.test(s)) return null;
+  try { return new URL(s).protocol === "https:" ? s : null; } catch { return null; }
+};
+/** A picture URL that's safe inside a CSS url('...'): absolute https, with no quote, paren, backslash or space. */
+const safeImage = (s: string): string | null => /['"()\\\s]/.test(s) ? null : safeLink(s);
 /** The description as plain text, up to the first rule (the library puts ages and fine print after an <hr>). */
 const summary = (html: string) => {
   const main = html.split(/<hr\s*\/?>/i)[0];
@@ -45,12 +53,13 @@ function parseItem(item: string): LibraryEvent | null {
   const cats = [...item.matchAll(/<category>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/category>/g)].map(m => decode(m[1]).trim()).filter(Boolean);
   const audiences = cats.filter(c => AUDIENCES.includes(c));
   const types = cats.filter(c => !AUDIENCES.includes(c) && !LANGUAGES.test(c));
-  const img = item.match(/<enclosure[^>]*url="([^"]+)"/)?.[1]?.replace(/^http:/, "https:") || null;
+  const raw = item.match(/<enclosure[^>]*url="([^"]+)"/)?.[1]?.replace(/^http:/, "https:");
+  const img = raw ? safeImage(raw) : null;
   const loc = tag(item, "bc:location"), reg = tag(item, "bc:registration_info");
   const featured = tag(item, "bc:is_featured") === "true" || tag(item, "bc:is_featured_at_location") === "true";
   const lat = parseFloat(tag(loc, "bc:latitude")), lon = parseFloat(tag(loc, "bc:longitude"));
   return {
-    id, title, url: url.replace(/^http:/, "https:"),
+    id, title, url: safeLink(url.replace(/^http:/, "https:")) ?? SOURCE_URL,
     start, end: tag(item, "bc:end_date"), startLocal: tag(item, "bc:start_date_local"), endLocal: tag(item, "bc:end_date_local"),
     place: decode(tag(loc, "bc:name")), room: decode(tag(loc, "bc:location_details")), city: decode(tag(loc, "bc:city")),
     lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
@@ -70,7 +79,7 @@ function parsePages(pages: string[], from: string, to: string) {
     if (e && !seen.has(e.id + e.start)) seen.set(e.id + e.start, e);
   }
   const events = [...seen.values()].filter(e => Date.parse(e.end || e.start) > Date.now()).sort((a, b) => a.start.localeCompare(b.start));
-  return { updatedAt: new Date().toISOString(), source: "Halifax Public Libraries", sourceUrl: "https://halifax.bibliocommons.com/v2/events", from, to, events };
+  return { updatedAt: new Date().toISOString(), source: "Halifax Public Libraries", sourceUrl: SOURCE_URL, from, to, events };
 }
 type EventsBody = ReturnType<typeof parsePages>;
 
