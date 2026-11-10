@@ -1,0 +1,29 @@
+{
+  "agent": "platform-reviewer",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Bash", "TaskStop"],
+  "edit": {
+    "allow": [],
+    "deny": []
+  },
+  "bash": [
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "*"],
+    ["git", "diff", "--stat"],
+    ["git", "diff", "*", "--stat"],
+    ["git", "diff", "-w", "*"],
+    ["git", "diff", "--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "*"],
+    ["git", "diff", "--name-status", "*"],
+    ["git", "diff", "*", "--", "re:^[A-Za-z0-9._/-]+$"],
+    ["git", "log", "--oneline", "-20"],
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["node", "--check", "re:^public/[a-z0-9-]+(/[a-z0-9-]+)*\\.js$"]
+  ]
+}
