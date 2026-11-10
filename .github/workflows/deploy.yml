@@ -42,6 +42,9 @@ jobs:
         run: npm test
       - name: Agent guard tests
         run: npm run test:hooks
+      # Drafts of protected files must be promoted (npm run drafts:promote) before they reach main
+      - name: No unpromoted drafts
+        run: test -z "$(git ls-files protected-drafts | grep -v '^protected-drafts/README.md$')"
       # The real site in a real browser (the runner's Chrome), against a local Worker with throwaway data
       - name: Browser check
         run: npm run test:e2e
