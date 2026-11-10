@@ -44,11 +44,12 @@ hour later in local time.
 
 Defined in [`.claude/agents/`](../.claude/agents/). They help build and change the platform; they don't run on their own.
 `engineer` and `designer` were retired on Nov. 8, 2026; Platform Core and Site & Design System replace them.
+`security-reviewer` was retired on Nov. 10, 2026; Trust & Safety replaces it and reviews other teams' sign-in,
+moderation, user-data and privacy changes.
 
 | Agent | For |
 |---|---|
 | `qa-tester` | End-to-end checks against `wrangler dev`, in the browser and by script |
-| `security-reviewer` | Auth, moderation, privacy and anything that handles user data |
 | `standards-keeper` | `newsroom/guidelines.md` and the routine prompts: clear, consistent, enforceable |
 | `docs-keeper` | Keeps `docs/`, `README.md` and `CLAUDE.md` true to the code |
 

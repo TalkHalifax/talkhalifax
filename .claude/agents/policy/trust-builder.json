@@ -1,0 +1,40 @@
+{
+  "agent": "trust-builder",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
+  "edit": {
+    "allow": [
+      "src/auth.ts",
+      "src/moderation.ts",
+      "src/screen.ts",
+      "test/unit/moderation.test.ts",
+      "test/unit/screen.test.ts",
+      "test/unit/reset.test.ts",
+      "test/unit/turnstile.test.ts"
+    ],
+    "deny": []
+  },
+  "bash": [
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "--stat"],
+    ["git", "branch", "--show-current"],
+    ["git", "checkout", "-b", "re:^trust/[a-z0-9._-]+$"],
+    ["git", "add", "src/auth.ts"],
+    ["git", "add", "src/moderation.ts"],
+    ["git", "add", "src/screen.ts"],
+    ["git", "add", "test/unit/moderation.test.ts"],
+    ["git", "add", "test/unit/screen.test.ts"],
+    ["git", "add", "test/unit/reset.test.ts"],
+    ["git", "add", "test/unit/turnstile.test.ts"],
+    ["git", "commit", "-m", "*"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "developer.mozilla.org", "cheatsheetseries.owasp.org"]
+}
