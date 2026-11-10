@@ -196,4 +196,76 @@ describe("library event details", () => {
     expect(get("d").title).toBe("Big &#1114112; Night");
     expect(get("x").title).toBe("Big &#x110000; Night");
   });
+
+  const LIBRARY_EVENTS = "https://halifax.bibliocommons.com/v2/events";
+  const pic = (url: string) => `<enclosure url="${url}" type="image/jpeg" length="0"/>`;
+
+  it("link to the library's events page when an event's link isn't an absolute https URL, keeping the event and its id", async () => {
+    const bad: Record<string, string> = {
+      "evt-js": "javascript:alert(1)/evt-js",
+      "evt-data": "data:text/html,x/evt-data",
+      "evt-rel": "/events/evt-rel",
+      "evt-ftp": "ftp://halifax.bibliocommons.com/events/evt-ftp",
+      "evt-bad": "https//halifax.bibliocommons.com/events/evt-bad",
+    };
+    const get = await ingestRich(
+      ...Object.entries(bad).map(([id, link]) => rich(id, { link, title: `Title ${id}`, place: `Place ${id}` })),
+      rich("ok"),
+    );
+    for (const id of Object.keys(bad)) {
+      expect(get(id).url, id).toBe(LIBRARY_EVENTS);
+      expect(get(id), id).toMatchObject({ id, title: `Title ${id}`, place: `Place ${id}` });
+    }
+    expect(get("evt-js").id).toBe("evt-js");
+    expect(get("ok").url).toBe("https://halifax.bibliocommons.com/events/ok");
+  });
+  it("keep a good https link byte for byte", async () => {
+    const get = await ingestRich(rich("ok", { link: "https://halifax.bibliocommons.com/events/ok" }));
+    expect(get("ok").url).toBe("https://halifax.bibliocommons.com/events/ok");
+  });
+  it("drop a picture that isn't an absolute https URL or that could break out of the style, keeping the event", async () => {
+    const bad: Record<string, string> = {
+      js: "javascript:alert(1)",
+      data: "data:image/png;base64,AAAA",
+      rel: "/uploads/rel.jpg",
+      ftp: "ftp://x.example/p.jpg",
+      quote: "https://x.example/a'b.jpg",
+      paren: "https://x.example/a(b).jpg",
+      slash: "https://x.example/a\\b.jpg",
+      space: "https://x.example/a b.jpg",
+      breakout: "https://x.example/a');background:red;('.jpg",
+    };
+    const get = await ingestRich(
+      ...Object.entries(bad).map(([id, url]) => rich(id, { extra: pic(url) })),
+      rich("dq", { extra: pic("https://x.example/a&quot;b.jpg") }),
+      rich("p", { extra: pic("https://halifax.bibliocommons.com/uploads/photo.jpg") }),
+    );
+    for (const id of Object.keys(bad)) {
+      expect(get(id).image, id).toBeNull();
+      expect(get(id).title, id).toBe(`Event ${id}`);
+    }
+    const dq = get("dq").image;
+    if (dq !== null) expect(dq).not.toMatch(/['"()\\\s]/);
+    expect(get("p").image).toBe("https://halifax.bibliocommons.com/uploads/photo.jpg");
+  });
+  it("keep every other detail the same when the link and picture are bad", async () => {
+    const extra = (img: string) => pic(img)
+      + "<bc:registration_info><bc:is_required>true</bc:is_required></bc:registration_info>"
+      + "<bc:is_featured>true</bc:is_featured><bc:is_cancelled>true</bc:is_cancelled>";
+    const same = { title: "Big Night", cats: ["Kids", "Teens", "Music", "French"], desc: "<![CDATA[<p>Join us &amp; sing.</p><hr><p>Ages 3+</p>]]>", place: "Keshen Goodman Public Library" };
+    const get = await ingestRich(
+      rich("bad", { ...same, link: "javascript:alert(1)/bad", extra: extra("https://x.example/a');background:red;('.jpg") }),
+      rich("good", { ...same, link: "https://halifax.bibliocommons.com/events/good", extra: extra("https://halifax.bibliocommons.com/uploads/photo.jpg") }),
+    );
+    const bad = get("bad"), good = get("good");
+    expect(bad.url).toBe(LIBRARY_EVENTS);
+    expect(bad.image).toBeNull();
+    expect(good.url).toBe("https://halifax.bibliocommons.com/events/good");
+    expect(good.image).toBe("https://halifax.bibliocommons.com/uploads/photo.jpg");
+    const fields = ["title", "start", "place", "city", "audiences", "types", "featured", "highlight", "cancelled", "registration", "summary"] as const;
+    for (const f of fields) expect(bad[f], f).toEqual(good[f]);
+    expect(good).toMatchObject({ featured: true, highlight: true, cancelled: true, registration: "required", summary: "Join us & sing.", audiences: ["Kids", "Teens"], types: ["Music"] });
+    const res = await (await events(env)).json<{ sourceUrl: string }>();
+    expect(res.sourceUrl).toBe(LIBRARY_EVENTS);
+  });
 });
