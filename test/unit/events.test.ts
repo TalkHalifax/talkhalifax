@@ -219,9 +219,15 @@ describe("library event details", () => {
     expect(get("evt-js").id).toBe("evt-js");
     expect(get("ok").url).toBe("https://halifax.bibliocommons.com/events/ok");
   });
-  it("keep a good https link byte for byte", async () => {
-    const get = await ingestRich(rich("ok", { link: "https://halifax.bibliocommons.com/events/ok" }));
-    expect(get("ok").url).toBe("https://halifax.bibliocommons.com/events/ok");
+  it("keep a good https link and picture byte for byte, not normalized", async () => {
+    // new URL().href would lower-case the host and drop the default port; both must be stored as written
+    const link = "https://Halifax.BiblioCommons.com:443/events/ok", img = "https://Halifax.BiblioCommons.com:443/uploads/photo.jpg";
+    expect(new URL(link).href).not.toBe(link);
+    expect(new URL(img).href).not.toBe(img);
+    const get = await ingestRich(rich("ok", { link, extra: pic(img) }), rich("plain"));
+    expect(get("ok").url).toBe(link);
+    expect(get("ok").image).toBe(img);
+    expect(get("plain").url).toBe("https://halifax.bibliocommons.com/events/plain");
   });
   it("drop a picture that isn't an absolute https URL or that could break out of the style, keeping the event", async () => {
     const bad: Record<string, string> = {
@@ -244,8 +250,7 @@ describe("library event details", () => {
       expect(get(id).image, id).toBeNull();
       expect(get(id).title, id).toBe(`Event ${id}`);
     }
-    const dq = get("dq").image;
-    if (dq !== null) expect(dq).not.toMatch(/['"()\\\s]/);
+    expect(get("dq").image ?? "").not.toMatch(/['"()\\\s]/);
     expect(get("p").image).toBe("https://halifax.bibliocommons.com/uploads/photo.jpg");
   });
   it("keep every other detail the same when the link and picture are bad", async () => {

@@ -12,7 +12,7 @@
   };
   const safeImage = s => typeof s !== "string" || /['"()\\\s]/.test(s) ? null : safeLink(s);
   const href = u => esc(safeLink(u) || safeLink(data?.sourceUrl) || LIBRARY_EVENTS);
-  const MONTHS =["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+  const MONTHS = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const WHEN = [["today", "Today"], ["weekend", "This weekend"], ["week", "This week"], ["all", "Next two weeks"]];
   const WHO = [["all", "Everyone"], ["kids", "Kids and families"], ["teens", "Teens"], ["adults", "Adults"]];
