@@ -21,6 +21,7 @@ You receive the scope and acceptance criteria from Andrew Dyer.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change at phone
    and desktop widths, online and offline.
+   - `node --check` on every client `.js` file the change touches, if any.
 4. `git add` each file you changed, by name, then `git commit -m "<message>"`, ending the message with the
    Co-Authored-By line given in the session.
 5. Report to Andrew Dyer exactly what you built and what ran, with results, and anything that failed or was skipped.

@@ -21,6 +21,9 @@ checked out.
 
 1. Read the diff (`git diff`, `git diff <ref>`, `git log --oneline -20`, `git status`) and check it against each
    numbered acceptance criterion: pass, or the exact gap.
+   - For a refactor, check that the code was moved, not rewritten. Use
+     `git diff --color-moved=zebra --color-moved-ws=allow-indentation-change <ref>`, and `git diff -w <ref>` to ignore
+     indentation.
 2. Run the tests: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
 3. Check the diff stays inside the Trust & Safety scope (`src/auth.ts`, `src/moderation.ts`, `src/screen.ts`,
