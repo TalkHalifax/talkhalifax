@@ -11,8 +11,8 @@ with a live chat. Start with these:
 - [newsroom/guidelines.md](newsroom/guidelines.md): how stories are written (agents read it every run)
 - [README.md](README.md): run locally, deploy, secrets
 
-Build agents for this repo are in `.claude/agents/` (qa-tester, security-reviewer, standards-keeper, docs-keeper),
-alongside the agent organization's teams (Agent Operations, Events, Platform Core, Site & Design System).
+Build agents for this repo are in `.claude/agents/` (qa-tester, standards-keeper, docs-keeper), alongside the agent
+organization's teams (Agent Operations, Events, Platform Core, Site & Design System, Trust & Safety).
 
 ## Rules
 
