@@ -1,7 +1,7 @@
 {
   "agent": "events-builder",
   "level": "L2",
-  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch"],
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
   "edit": {
     "allow": ["src/events.ts", "public/events.js", "test/unit/events.test.ts"],
     "deny": []
