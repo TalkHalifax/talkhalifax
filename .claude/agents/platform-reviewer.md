@@ -17,8 +17,12 @@ You review in the worktree where the branch is already checked out.
 
 1. Read the diff (`git diff`, `git diff <ref>`, `git log --oneline -20`, `git status`) and check it against each
    numbered acceptance criterion: pass, or the exact gap.
+   - For a refactor, check that the code was moved, not rewritten. Use
+     `git diff --color-moved=zebra --color-moved-ws=allow-indentation-change <ref>`, and `git diff -w <ref>` to ignore
+     indentation.
 2. Run the tests: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
+   - `node --check` on every client `.js` file the change touches, if any.
 3. Check the diff stays inside the Platform Core scope (`src/index.ts`, `src/env.ts`, `src/github-jobs.ts`,
    `src/text-modules.d.ts`, `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`,
    `test/unit/headers.test.ts`, `test/unit/github-jobs.test.ts`) and follows the Platform Core rules below. A

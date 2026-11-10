@@ -13,6 +13,7 @@
     ["npx", "tsc", "-p", "test"],
     ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
     ["npx", "wrangler", "dev"],
+    ["node", "--check", "re:^public/[a-z0-9-]+(/[a-z0-9-]+)*\\.js$"],
     ["git", "status"],
     ["git", "status", "--short"],
     ["git", "diff"],

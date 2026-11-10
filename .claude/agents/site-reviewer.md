@@ -17,9 +17,13 @@ You review in the worktree where the branch is already checked out.
 
 1. Read the diff (`git diff`, `git diff <ref>`, `git log --oneline -20`, `git status`) and check it against each
    numbered acceptance criterion: pass, or the exact gap.
+   - For a refactor, check that the code was moved, not rewritten. Use
+     `git diff --color-moved=zebra --color-moved-ws=allow-indentation-change <ref>`, and `git diff -w <ref>` to ignore
+     indentation.
 2. Run the tests: `npm test`, `npm run test:e2e` (the end-to-end checks at phone and desktop widths),
    `npx tsc --noEmit`, `npx tsc -p test`, `npx wrangler d1 migrations apply talkhalifax --local`, and
    `npx wrangler dev` to exercise the change.
+   - `node --check` on every client `.js` file the change touches, if any.
 3. Check the diff stays inside the Site & Design System scope (`public/app.js`, `public/index.html`, `public/sw.js`,
    `public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**`, `public/api.js`,
    `public/chat.js`, `docs/DESIGN-SYSTEM.md`), follows the design system and the rules below, and that a refactor

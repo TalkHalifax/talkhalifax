@@ -18,8 +18,12 @@ You receive the scope and acceptance criteria from Roman Greene.
 2. Build the scope, editing only `src/index.ts`, `src/env.ts`, `src/github-jobs.ts`, `src/text-modules.d.ts`,
    `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`, `test/unit/headers.test.ts` and
    `test/unit/github-jobs.test.ts`. Add a test for every new rule or route.
+   - End-to-end checks are drafted in `protected-drafts/test/e2e/`, at the path they will have in `test/e2e/`. You
+     can't run a draft, because nothing loads that folder. Say what each new check does, and the orchestrator runs and
+     promotes it.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
+   - `node --check` on every client `.js` file the change touches, if any.
 4. `git add` each file you changed, by name, then `git commit -m "<message>"`, ending the message with the
    Co-Authored-By line given in the session.
 5. Report to Roman Greene exactly what you built and what ran, with results, and anything that failed or was skipped.
