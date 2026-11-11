@@ -101,8 +101,18 @@ const clearThrottle = (env: Env, key: string) => env.DB.prepare("DELETE FROM aut
 
 /** JSON POSTs must come from this site: blocks other sites from signing people in or out behind their backs. */
 export function sameOrigin(req: Request, url: URL) {
+  return originMatches(req, url) && (req.headers.get("content-type") || "").startsWith("application/json");
+}
+
+/** The origin header is present and is this site. For requests with no body, such as DELETE, so it ignores the content type. */
+export function originMatches(req: Request, url: URL): boolean {
   const origin = req.headers.get("origin");
-  return !!origin && origin === url.origin && (req.headers.get("content-type") || "").startsWith("application/json");
+  return !!origin && origin === url.origin;
+}
+
+/** The set-cookie value that ends the session in this browser. */
+export function clearSessionCookie(url: URL): string {
+  return setCookie(url, SESSION_COOKIE, "", 0);
 }
 
 async function readCreds(req: Request) {
@@ -353,7 +363,7 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
   if (path === "/auth/logout" && req.method === "POST") {
     const sid = cookies(req)[SESSION_COOKIE];
     if (sid) await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
-    return json({ ok: true }, { headers: { "set-cookie": setCookie(url, SESSION_COOKIE, "", 0) } });
+    return json({ ok: true }, { headers: { "set-cookie": clearSessionCookie(url) } });
   }
 
   return null;
