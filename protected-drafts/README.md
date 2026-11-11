@@ -29,6 +29,9 @@ does nothing until it's promoted.
    - after a `package.json` draft, reminds you to run `npm install` and commit `package-lock.json` with it.
 4. **Commit, push, wait for `check`, merge.**
 
+Until the draft is promoted on its branch, the pull request's `check` fails at "No unpromoted drafts". That's
+expected: promotion is what lets CI run the change for real.
+
 CI fails if `main` has anything here except this README, so a draft that was never promoted can't sit unseen.
 
 `tsconfig*.json` and `vitest.config.*` can't be drafted: the guard refuses those names anywhere. The orchestrator
