@@ -61,6 +61,29 @@ function refusingDb() {
 }
 const call = (e: Env, url: string, init: RequestInit) => worker.fetch!(new Request(url, init) as never, e, {} as ExecutionContext);
 
+/** Missing, another site, the literal "null", and a lookalike host that starts with the site's address. */
+const BAD_ORIGINS: (string | null)[] = [null, OTHER, "null", `${ORIGIN}.example.test`];
+
+/** A signed-in DELETE with each bad origin is 400, and the database is never asked anything. */
+async function expectNoLookupForBadOrigins(url: string) {
+  for (const origin of BAD_ORIGINS) {
+    const db = refusingDb();
+    const headers: Record<string, string> = origin === null ? { cookie: COOKIE } : { cookie: COOKIE, origin };
+    const r = await call(db.env, url, { method: "DELETE", headers });
+    expect(r.status, `origin ${origin}`).toBe(400);
+    expect(db.queries, `origin ${origin}`).toEqual([]);
+  }
+}
+
+/** The control: with the right origin, the session lookup reaches the refusing database (500, one sessions query). */
+async function expectLookupForGoodOrigin(url: string) {
+  const db = refusingDb();
+  const r = await call(db.env, url, { method: "DELETE", headers: { cookie: COOKIE, origin: ORIGIN } });
+  expect(r.status).toBe(500);
+  expect(db.queries).toHaveLength(1);
+  expect(db.queries[0]).toContain("FROM sessions");
+}
+
 async function signIn(id: string) {
   await makeUser(id);
   const sid = `s_${id}`;
@@ -74,12 +97,10 @@ describe("DELETE /api/me", () => {
     expect((await call(env, `${ORIGIN}/api/me`, { method: "DELETE", headers: { origin: OTHER } })).status).toBe(400);
   });
   it("never looks up the session for a bad origin", async () => {
-    for (const headers of [{ cookie: COOKIE }, { cookie: COOKIE, origin: OTHER }] as Record<string, string>[]) {
-      const db = refusingDb();
-      const r = await call(db.env, `${ORIGIN}/api/me`, { method: "DELETE", headers });
-      expect(r.status).toBe(400);
-      expect(db.queries).toEqual([]);
-    }
+    await expectNoLookupForBadOrigins(`${ORIGIN}/api/me`);
+  });
+  it("does look up the session once the origin is right, so the check above would catch a swapped order", async () => {
+    await expectLookupForGoodOrigin(`${ORIGIN}/api/me`);
   });
   for (const origin of [ORIGIN, "http://localhost:8787"]) {
     it(`deletes the account and clears the cookie with clearSessionCookie on ${origin}, with no content-type`, async () => {
@@ -97,6 +118,12 @@ describe("DELETE /api/comments/:id", () => {
   it("refuses a request with no origin, or from another site", async () => {
     expect((await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE" })).status).toBe(400);
     expect((await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE", headers: { origin: OTHER } })).status).toBe(400);
+  });
+  it("never looks up the session for a bad origin", async () => {
+    await expectNoLookupForBadOrigins(`${ORIGIN}/api/comments/c_1`);
+  });
+  it("does look up the session once the origin is right, so the check above would catch a swapped order", async () => {
+    await expectLookupForGoodOrigin(`${ORIGIN}/api/comments/c_1`);
   });
   it("passes the origin check with the right origin and no content-type", async () => {
     const r = await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE", headers: { origin: ORIGIN } });
