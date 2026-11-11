@@ -50,6 +50,7 @@ The [roadmap](ROADMAP.md) says when each one is scheduled.
 
 ## Paid off
 
+- **Nov. 11, 2026:** every `/api` route has an end-to-end check (123 new checks, PC-2, Platform Core), the first change made through the drafts path for protected files. `/auth/*`, `/mcp`, `/telegram/*` and the chat WebSocket still have none.
 - **Nov. 10, 2026:** library event links and pictures are checked before they reach the page: a `javascript:` link or a picture address that could break out of its CSS can no longer come through the feed (EVT-2, Events).
 - **Nov. 9, 2026:** **C4** closed. The client half: `public/app.js` split into ES modules (`api.js`, `chat.js`, `views/`) and the CSS moved from `index.html` to `styles.css`, with nothing visible changed and no bundler. CI now syntax-checks every client module. Site & Design System's first job.
 - **Nov. 8, 2026:** the server half of **C4**: the site's `/api/*` handlers moved out of `src/index.ts` into modules under `src/routes/`, with no change in behaviour. Platform Core's first job.
