@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { clearSessionCookie } from "../../src/auth";
+import type { Env } from "../../src/env";
 import worker from "../../src/index";
-import { env, makeStory } from "./helpers";
+import { env, makeStory, makeUser } from "./helpers";
 
 const ORIGIN = "https://talkhalifax.ca";
 const get = (url: string, init?: RequestInit) => worker.fetch!(new Request(url, init) as never, env, {} as ExecutionContext);
@@ -43,5 +45,82 @@ describe("security headers", () => {
     expect(r.headers.get("x-frame-options")).toBeNull();
     r.webSocket!.accept();
     r.webSocket!.close();
+  });
+});
+
+// The origin checks on the API routes that change things (PC-3, JOB-9)
+const OTHER = "https://example.test";
+const COOKIE = "th_session=s_origin_test";
+
+/** The test bindings with a database that refuses every query and records that it was asked. */
+function refusingDb() {
+  const queries: string[] = [];
+  const refuse = (what: string) => { queries.push(what); throw new Error(`Unexpected database call: ${what}`); };
+  const DB = { prepare: (sql: string) => refuse(sql), batch: () => refuse("batch"), exec: (sql: string) => refuse(sql), dump: () => refuse("dump") };
+  return { env: { ...env, DB } as unknown as Env, queries };
+}
+const call = (e: Env, url: string, init: RequestInit) => worker.fetch!(new Request(url, init) as never, e, {} as ExecutionContext);
+
+async function signIn(id: string) {
+  await makeUser(id);
+  const sid = `s_${id}`;
+  await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(sid, id, Date.now(), Date.now() + 36e5).run();
+  return `th_session=${sid}`;
+}
+
+describe("DELETE /api/me", () => {
+  it("refuses a request with no origin, or from another site", async () => {
+    expect((await call(env, `${ORIGIN}/api/me`, { method: "DELETE" })).status).toBe(400);
+    expect((await call(env, `${ORIGIN}/api/me`, { method: "DELETE", headers: { origin: OTHER } })).status).toBe(400);
+  });
+  it("never looks up the session for a bad origin", async () => {
+    for (const headers of [{ cookie: COOKIE }, { cookie: COOKIE, origin: OTHER }] as Record<string, string>[]) {
+      const db = refusingDb();
+      const r = await call(db.env, `${ORIGIN}/api/me`, { method: "DELETE", headers });
+      expect(r.status).toBe(400);
+      expect(db.queries).toEqual([]);
+    }
+  });
+  for (const origin of [ORIGIN, "http://localhost:8787"]) {
+    it(`deletes the account and clears the cookie with clearSessionCookie on ${origin}, with no content-type`, async () => {
+      const cookie = await signIn(`u_del_${origin.startsWith("https") ? "live" : "local"}`);
+      const url = new URL(`${origin}/api/me`);
+      const r = await call(env, url.href, { method: "DELETE", headers: { origin, cookie } });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ ok: true });
+      expect(r.headers.get("set-cookie")).toBe(clearSessionCookie(url));
+    });
+  }
+});
+
+describe("DELETE /api/comments/:id", () => {
+  it("refuses a request with no origin, or from another site", async () => {
+    expect((await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE" })).status).toBe(400);
+    expect((await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE", headers: { origin: OTHER } })).status).toBe(400);
+  });
+  it("passes the origin check with the right origin and no content-type", async () => {
+    const r = await call(env, `${ORIGIN}/api/comments/c_1`, { method: "DELETE", headers: { origin: ORIGIN } });
+    expect(r.status).toBe(401);
+    expect(await r.json()).toEqual({ error: "Sign in first." });
+  });
+});
+
+describe("/api/reports", () => {
+  it("refuses a POST from another site before looking up the session", async () => {
+    const db = refusingDb();
+    const r = await call(db.env, `${ORIGIN}/api/reports`, { method: "POST", headers: { origin: OTHER, "content-type": "application/json", cookie: COOKIE }, body: "{}" });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "Bad request" });
+    expect(db.queries).toEqual([]);
+  });
+  it("still asks a signed-out POST from this site to sign in", async () => {
+    const r = await call(env, `${ORIGIN}/api/reports`, { method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: "{}" });
+    expect(r.status).toBe(401);
+    expect(await r.json()).toEqual({ error: "Sign in to report." });
+  });
+  it("still keeps the list to moderators", async () => {
+    const r = await call(env, `${ORIGIN}/api/reports`, { method: "GET" });
+    expect(r.status).toBe(403);
+    expect(await r.json()).toEqual({ error: "Moderators only." });
   });
 });
