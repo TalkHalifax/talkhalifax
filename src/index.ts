@@ -19,6 +19,7 @@ import { commentRoutes } from "./routes/comments";
 import { reviewRoutes } from "./routes/review";
 export { ArticleRoom } from "./room";
 export { StatsHub } from "./stats";
+export { AdminApi } from "./routes/admin-api";
 
 async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   const path = url.pathname;
