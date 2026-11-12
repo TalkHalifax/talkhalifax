@@ -3,7 +3,7 @@
 export interface PasswordEnv {
   ADMIN_USER?: string;
   ADMIN_PASSWORD?: string;
-  /** Caps sign-in attempts per IP address. */
+  /** Caps sign-in attempts per IP address. Without it, password sign-in is refused (503). */
   LOGIN_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
 
