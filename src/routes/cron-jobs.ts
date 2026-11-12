@@ -22,15 +22,19 @@ export interface CronJob {
   /** The job's name in the cron-health feed. Changing one resets its failure count. */
   readonly key: string;
   readonly run: (env: Env) => Promise<unknown>;
+  /** How the admin site lists the job (AdminApi.jobs). The cron ignores these. */
+  readonly name: string;
+  readonly does: string;
+  readonly every: string;
 }
 
 /** What the cron runs every 30 minutes, in this order. Each failure is counted under the job's key (see watchCron). */
 export const CRON_JOBS: readonly CronJob[] = [
-  { key: "weather", run: refreshWeather },
-  { key: "alerts", run: refreshAlerts },
-  { key: "events", run: checkEvents },
-  { key: "stages", run: evaluateStages },
-  { key: "transit schedule", run: async () => checkTransitSchedule() },
-  { key: "GitHub jobs", run: startGithubJobs },
-  { key: "clean-up", run: tidyUp },
+  { key: "weather", run: refreshWeather, name: "Weather", does: "Current conditions for the header", every: "30 minutes" },
+  { key: "alerts", run: refreshAlerts, name: "Weather warnings", does: "Environment Canada banners and notices", every: "30 minutes" },
+  { key: "events", run: checkEvents, name: "Events check", does: "Warns when library events stop arriving", every: "30 minutes" },
+  { key: "stages", run: evaluateStages, name: "Stages", does: "Moves Developing stories to Articles", every: "30 minutes" },
+  { key: "transit schedule", run: async () => checkTransitSchedule(), name: "Transit schedule check", does: "Warns before the map's schedule data runs out", every: "30 minutes" },
+  { key: "GitHub jobs", run: startGithubJobs, name: "GitHub jobs", does: "Starts the library events and Transit jobs", every: "30 minutes" },
+  { key: "clean-up", run: tidyUp, name: "Clean-up", does: "Expired sessions, links, rate limits and old counts", every: "30 minutes" },
 ];
