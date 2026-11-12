@@ -12,7 +12,8 @@ with a live chat. Start with these:
 - [README.md](README.md): run locally, deploy, secrets
 
 Build agents for this repo are in `.claude/agents/` (qa-tester, standards-keeper, docs-keeper), alongside the agent
-organization's teams (Agent Operations, Events, Platform Core, Site & Design System, Trust & Safety).
+organization's teams (Agent Operations, Events, Platform Core, Site & Design System, Trust & Safety, Infrastructure &
+Continuity).
 
 ## Rules
 
