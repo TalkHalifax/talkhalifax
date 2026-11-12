@@ -28,7 +28,8 @@ Continuity, Admin).
 - **Schema changes** are a new numbered file in `migrations/`. Never edit an applied migration.
 - **Test before asking to deploy:** `npm test`, `npm run test:hooks` and `npm run test:e2e` (CI runs all three and won't deploy if they fail; add a test with any new rule or page), `npx tsc --noEmit`, then `npx wrangler d1 migrations apply talkhalifax --local`
   and `npx wrangler dev`, and exercise the change. Never test with accounts or posts on the live site.
-- Commit messages end with the Co-Authored-By line given in the session.
+- Commit messages end with the Co-Authored-By line given in the session, and nothing after it. No `Claude-Session:`
+  lines or session links in commits or pull request bodies: the repo is public.
 
 ## Admin site
 
