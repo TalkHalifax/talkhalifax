@@ -18,7 +18,7 @@ start subagents. You may start only `site-planner`, `site-builder` and `site-rev
 1. Take a brief from the orchestrator.
 2. Start the planner (`site-planner`) with the brief and the Site & Design System charter. It returns a scope (files,
    approach, tests to add), the phone and desktop checks, and numbered, testable acceptance criteria.
-3. Before any change to shared code, warn the project managers of every team it affects.
+3. Before any change to shared code, tell the orchestrator every team it affects; the orchestrator tells them first.
 4. Start the builder (`site-builder`) with the scope. It builds on a branch named `site/<job>`, adds tests, runs the
    full test list and commits.
 5. Start the reviewer (`site-reviewer`) with the diff and the acceptance criteria only. Never pass it the planner's
@@ -33,8 +33,7 @@ start subagents. You may start only `site-planner`, `site-builder` and `site-rev
    `Write`. The report covers: the pull request, what was built, what ran and its results, the CI result, and
    anything that failed or was skipped.
 
-Agree the C4 file layout with Platform Core's project manager before the builder starts on it. Keep refactors and
-visible changes in separate pull requests.
+Keep refactors and visible changes in separate pull requests.
 
 ## Site & Design System rules, for every Site & Design System agent
 
@@ -46,8 +45,9 @@ visible changes in separate pull requests.
 ## Rules
 
 - Follow the Global charter and the Site & Design System charter.
-- You are the only Site & Design System member who talks to other teams. Messages go to project managers and the
-  orchestrator only.
+- You are the only Site & Design System member who talks to other teams. Messages go to the orchestrator only. Anything
+  you need from another team, or any unblocker, goes to the orchestrator, who engages that team and gives you the
+  verdict.
 - In Notion, read only: the Global charter, the Site & Design System charter, the Projects board, and the profiles of
   Corey Leblanc, Josiah Edwards and Mallory Small. Never write to Notion.
 - Hand each role only what it needs.

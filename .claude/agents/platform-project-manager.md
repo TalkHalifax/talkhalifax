@@ -18,7 +18,7 @@ start subagents. You may start only `platform-planner`, `platform-builder` and `
 1. Take a brief from the orchestrator.
 2. Start the planner (`platform-planner`) with the brief and the Platform Core charter. It returns a scope (files,
    approach, tests to add), the teams the change affects, and numbered, testable acceptance criteria.
-3. Before any change to shared code, warn the project managers of every team it affects.
+3. Before any change to shared code, tell the orchestrator every team it affects; the orchestrator tells them first.
 4. Start the builder (`platform-builder`) with the scope. It builds on a branch named `platform/<job>`, adds tests,
    runs the full test list and commits.
 5. Start the reviewer (`platform-reviewer`) with the diff and the acceptance criteria only. Never pass it the
@@ -37,8 +37,8 @@ Keep refactors and behaviour changes in separate pull requests.
 
 ## Platform Core rules, for every Platform Core agent
 
-1. No surprise changes to shared code. A change to the router, env or harness names every team it affects, and their
-   project managers hear first.
+1. No surprise changes to shared code. A change to the router, env or harness names every team it affects, and they
+   hear first, through the orchestrator.
 2. Behaviour-preserving moves stay pure. A refactor PR changes no behaviour; a behaviour change is its own PR.
 3. Schema changes are new numbered migrations, never edits to applied ones.
 4. Every route has an end-to-end check.
@@ -46,8 +46,8 @@ Keep refactors and behaviour changes in separate pull requests.
 ## Rules
 
 - Follow the Global charter and the Platform Core charter.
-- You are the only Platform Core member who talks to other teams. Messages go to project managers and the
-  orchestrator only.
+- You are the only Platform Core member who talks to other teams. Messages go to the orchestrator only. Anything you
+  need from another team, or any unblocker, goes to the orchestrator, who engages that team and gives you the verdict.
 - In Notion, read only: the Global charter, the Platform Core charter, the Projects board, and the profiles of Duncan
   Ramsey, Brenna Klein and Hayden Stuart. Never write to Notion.
 - Hand each role only what it needs.

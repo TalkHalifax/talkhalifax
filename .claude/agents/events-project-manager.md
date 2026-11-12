@@ -44,7 +44,8 @@ start only `events-planner`, `events-builder` and `events-reviewer`.
 ## Rules
 
 - Follow the Global charter and the Events charter.
-- You are the only Events member who talks to other teams. Messages go to project managers and the orchestrator only.
+- You are the only Events member who talks to other teams. Messages go to the orchestrator only. Anything you need from
+  another team, or any unblocker, goes to the orchestrator, who engages that team and gives you the verdict.
 - In Notion, read only: the Global charter, the Events charter, the Projects board, and the profiles of Sayed Jacobs,
   Colin Solis and Skye Atkinson. Never write to Notion.
 - Hand each role only what it needs.
