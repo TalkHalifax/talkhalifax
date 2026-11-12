@@ -132,8 +132,8 @@ On the Worker (`npx wrangler secret put <NAME>`): `NEWSROOM_TOKEN`, `TELEGRAM_BO
 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and `ADMIN_EMAILS` (optional, for Google sign-in, none set), `TURNSTILE_SECRET` (set Nov. 6),
 `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (push alerts; `node scripts/vapid-keys.mjs`, set Nov. 5), `EVENTS_TOKEN` (library events from GitHub; `node scripts/events-token.mjs` sets it here and on GitHub), `GITHUB_ACTIONS_TOKEN` (fine-grained GitHub token for this repo with Actions read and write, so the cron can start the Events and Transit jobs; a refusal reaches the editor on Telegram).
 In `wrangler.jsonc` vars: `ADMIN_USERNAMES`, and `TURNSTILE_SITE_KEY` (public).
-On the admin Worker (`--config admin/wrangler.jsonc`): `ADMIN_USER` and `ADMIN_PASSWORD` (16 characters or more), or later `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` for Cloudflare Access, which then replaces the password. It refuses everything until one pair is set.
-GitHub repository secrets: `CLOUDFLARE_API_TOKEN` (Workers Scripts Edit, D1 Edit; it also covers the Workers AI binding) and `EVENTS_TOKEN` (the Events workflow).
+On the admin Worker (`--config admin/wrangler.jsonc`): `ADMIN_USER` and `ADMIN_PASSWORD` (16 characters or more), or later `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` for Cloudflare Access, which then replaces the password. It refuses everything until one pair is set, and password sign-in also needs the `LOGIN_LIMIT` rate limit in `admin/wrangler.jsonc`: without it, sign-in is refused (503).
+GitHub secrets: `CLOUDFLARE_API_TOKEN` in the `production` environment, which only `main` can deploy from (Workers Scripts Edit, D1 Edit; it also covers the Workers AI binding), and the repository secret `EVENTS_TOKEN` (the Events workflow).
 Cloud routines: environment variable `TALKHALIFAX_TOKEN` (the newsroom token) and network access to the site.
 
 ## The repo, `main` and the agent guard
