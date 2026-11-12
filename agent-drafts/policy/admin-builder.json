@@ -1,0 +1,32 @@
+{
+  "agent": "admin-builder",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
+  "edit": {
+    "allow": [
+      "admin/src/**",
+      "admin/public/**",
+      "test/unit/admin.test.ts"
+    ],
+    "deny": []
+  },
+  "bash": [
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["node", "--check", "re:^admin/public/[a-z0-9-]+\\.js$"],
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "--stat"],
+    ["git", "branch", "--show-current"],
+    ["git", "checkout", "-b", "re:^admin/[a-z0-9._-]+$"],
+    ["git", "add", "re:^admin/(src|public)/[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
+    ["git", "add", "test/unit/admin.test.ts"],
+    ["git", "commit", "-m", "*"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
+}
