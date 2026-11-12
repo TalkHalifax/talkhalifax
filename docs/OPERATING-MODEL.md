@@ -1,6 +1,6 @@
 # TalkHalifax operating model
 
-_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram. Last updated November 7, 2026._
+_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram. Last updated November 11, 2026._
 
 ## The team
 
@@ -71,6 +71,13 @@ actually follow: their definitions in `.claude/agents/` and their policies in `.
   (migrations, `package.json`, `test/e2e/`, wrangler configs, workflows, scripts) drafts it in `protected-drafts/`.
   When the editor approves the pull request, the orchestrator runs `npm run drafts:promote` to move it into place.
   See [`protected-drafts/README.md`](../protected-drafts/README.md).
+- **Outside reviews.** Trust & Safety reviews other teams' sign-in, moderation, user-data and privacy changes.
+  Infrastructure & Continuity (hired Nov. 11, 2026: a project manager and a Senior Reviewer, no builder) reviews any
+  team's change to workflows, wrangler configs, migrations, `package.json` or scripts, including protected drafts
+  before they're promoted, and checks backups, restores and rollbacks. Neither edits the other team's code.
+- **Requests go through the orchestrator.** A team that needs something from another team, or an unblocker, asks its
+  own project manager, who asks the orchestrator. The orchestrator engages the other team, or Agent Operations, and
+  gives back the verdict. Project managers message only the orchestrator.
 - **Work reaches the site only through a pull request** that passes the `check` job and that the editor merges.
 
 ## A day in the newsroom
