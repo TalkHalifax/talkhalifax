@@ -21,10 +21,6 @@ You receive the scope and acceptance criteria from Roman Greene.
    - End-to-end checks are drafted in `protected-drafts/test/e2e/`, at the path they will have in `test/e2e/`. You
      can't run a draft, because nothing loads that folder. Say what each new check does, and the orchestrator runs and
      promotes it.
-   - For the IC-1 fix only, you may draft `.github/workflows/deploy.yml`, `events.yml` and `transit.yml` at
-     `protected-drafts/.github/workflows/`, following the scope and acceptance criteria in your brief. Never widen
-     `permissions:`, and never add secrets, triggers or workflow files. You can't run a draft; Infrastructure &
-     Continuity reviews it from outside before the orchestrator promotes it.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
    - `node --check` on every client `.js` file the change touches, if any.
