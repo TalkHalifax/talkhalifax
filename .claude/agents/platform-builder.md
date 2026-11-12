@@ -16,8 +16,8 @@ You receive the scope and acceptance criteria from Roman Greene.
 
 1. `git checkout -b platform/<job>`.
 2. Build the scope, editing only `src/index.ts`, `src/env.ts`, `src/github-jobs.ts`, `src/text-modules.d.ts`,
-   `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`, `test/unit/headers.test.ts` and
-   `test/unit/github-jobs.test.ts`. Add a test for every new rule or route.
+   `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`, `test/unit/headers.test.ts`,
+   `test/unit/github-jobs.test.ts` and `test/unit/admin-api.test.ts`. Add a test for every new rule or route.
    - End-to-end checks are drafted in `protected-drafts/test/e2e/`, at the path they will have in `test/e2e/`. You
      can't run a draft, because nothing loads that folder. Say what each new check does, and the orchestrator runs and
      promotes it.
