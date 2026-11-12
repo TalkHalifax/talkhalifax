@@ -6,7 +6,10 @@
     "allow": [
       "admin/src/**",
       "admin/public/**",
-      "test/unit/admin.test.ts"
+      "test/unit/admin.test.ts",
+      "protected-drafts/admin/wrangler.jsonc",
+      "protected-drafts/test/wrangler.admin.jsonc",
+      "protected-drafts/test/e2e/routes.mjs"
     ],
     "deny": []
   },
@@ -26,6 +29,7 @@
     ["git", "checkout", "-b", "re:^admin/[a-z0-9._-]+$"],
     ["git", "add", "re:^admin/(src|public)/[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
     ["git", "add", "test/unit/admin.test.ts"],
+    ["git", "add", "re:^protected-drafts/(admin/wrangler\\.jsonc|test/wrangler\\.admin\\.jsonc|test/e2e/routes\\.mjs)$"],
     ["git", "commit", "-m", "*"]
   ],
   "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
