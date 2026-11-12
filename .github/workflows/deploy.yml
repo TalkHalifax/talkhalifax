@@ -1,4 +1,4 @@
-# Deploys TalkHalifax to Cloudflare on every push to main (and on demand).
+# Deploys TalkHalifax to Cloudflare on every push to main (and on demand, from main only).
 # Pull requests get the checks and tests only; a failure in either stops the deploy.
 #
 # Needs one repository secret: CLOUDFLARE_API_TOKEN, a Cloudflare API token with
@@ -14,10 +14,10 @@ on:
     paths-ignore: ["README.md"]
   workflow_dispatch:
 
-# One deploy at a time; a newer push waits for the running one instead of cancelling it mid-migration
+# Pull request runs: a newer push cancels the older run. Everything else (main): one at a time, never cancelled mid-migration.
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -51,7 +51,7 @@ jobs:
 
   deploy:
     needs: check
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     env:

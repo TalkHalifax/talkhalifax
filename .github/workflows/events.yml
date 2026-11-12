@@ -18,7 +18,9 @@ permissions:
 
 jobs:
   events:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: events
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
