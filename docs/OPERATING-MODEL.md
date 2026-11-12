@@ -1,6 +1,6 @@
 # TalkHalifax operating model
 
-_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram. Last updated November 11, 2026._
+_How the newsroom runs around the clock: who does what, when, and how the editor stays in control from Telegram. Last updated November 12, 2026._
 
 ## The team
 
@@ -75,6 +75,9 @@ actually follow: their definitions in `.claude/agents/` and their policies in `.
   Infrastructure & Continuity (hired Nov. 11, 2026: a project manager and a Senior Reviewer, no builder) reviews any
   team's change to workflows, wrangler configs, migrations, `package.json` or scripts, including protected drafts
   before they're promoted, and checks backups, restores and rollbacks. Neither edits the other team's code.
+- **Admin** (hired Nov. 12, 2026) owns the admin site in `admin/`, the control panel for the live service. It is
+  planned to move into its own private repository, reaching the site's data only through a private API on the main
+  Worker; until then its builder edits only `admin/src/`, `admin/public/` and `test/unit/admin.test.ts`.
 - **Requests go through the orchestrator.** A team that needs something from another team, or an unblocker, asks its
   own project manager, who asks the orchestrator. The orchestrator engages the other team, or Agent Operations, and
   gives back the verdict. Project managers message only the orchestrator.
