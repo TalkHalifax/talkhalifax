@@ -13,6 +13,7 @@
       "test/unit/setup.ts",
       "test/unit/headers.test.ts",
       "test/unit/github-jobs.test.ts",
+      "test/unit/admin-api.test.ts",
       "protected-drafts/test/e2e/**"
     ],
     "deny": []
@@ -40,6 +41,7 @@
     ["git", "add", "test/unit/setup.ts"],
     ["git", "add", "test/unit/headers.test.ts"],
     ["git", "add", "test/unit/github-jobs.test.ts"],
+    ["git", "add", "test/unit/admin-api.test.ts"],
     ["git", "add", "re:^protected-drafts/test/e2e/[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
     ["git", "commit", "-m", "*"]
   ],
