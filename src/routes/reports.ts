@@ -7,12 +7,13 @@ export async function reportRoutes(req: Request, env: Env, url: URL): Promise<Re
 
   // Reports: anyone signed in flags a message or comment; moderators review them
   if (path === "/api/reports") {
-    const u = await currentUser(req, env);
     if (req.method === "POST") {
       if (!sameOrigin(req, url)) return json({ error: "Bad request" }, { status: 400 });
+      const u = await currentUser(req, env);
       if (!u) return json({ error: "Sign in to report." }, { status: 401 });
       return report(req, env, u, (k, n, w) => allow(env, k, n, w));
     }
+    const u = await currentUser(req, env);
     if (!u || u.role !== "moderator") return json({ error: "Moderators only." }, { status: 403 });
     return listReports(env);
   }

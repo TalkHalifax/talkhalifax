@@ -460,7 +460,7 @@ try {
     r = await api("DELETE", "/api/comments/c_e2e_mine", { as: MEMBER, origin: null });
     ok(r.status === 400, "api: deleting a comment without an origin is refused", http(r));
     r = await api("DELETE", "/api/comments/c_e2e_mine");
-    ok(r.status === 401, "api: DELETE /api/comments/:id without content-type passes the origin check (today: direct origin compare, JOB-10 may change)", http(r));
+    ok(r.status === 401, "api: DELETE /api/comments/:id without content-type passes the origin check (originMatches)", http(r));
     r = await api("DELETE", "/api/comments/c_nope", { as: MEMBER });
     ok(r.status === 404, "api: deleting an unknown comment is 404", http(r));
     r = await api("DELETE", "/api/comments/c_e2e_other", { as: MEMBER });
@@ -624,9 +624,9 @@ try {
     r = await api("DELETE", "/api/me", { as: GONE, origin: "http://evil.example" });
     ok(r.status === 400, "api: deleting an account from another site is refused", http(r));
     r = await api("DELETE", "/api/me");
-    ok(r.status === 401, "api: DELETE /api/me without content-type passes the origin check (today: direct origin compare, JOB-10 may change)", http(r));
+    ok(r.status === 401, "api: DELETE /api/me without content-type passes the origin check (originMatches)", http(r));
     r = await api("DELETE", "/api/me", { as: GONE });
-    ok(r.status === 200 && r.body?.ok === true && r.cookie.includes("th_session=;") && r.cookie.includes("Max-Age=0"), "api: a member deletes their account, and the session cookie is cleared", http(r));
+    ok(r.status === 200 && r.body?.ok === true && r.cookie.includes("th_session=;") && r.cookie.includes("Max-Age=0") && !r.cookie.includes("Secure"), "api: a member deletes their account, and the session cookie is cleared with Max-Age=0 and no Secure on local http", http(r));
     r = await api("GET", "/api/me", { as: GONE });
     ok(r.status === 200 && r.body?.user === null, "api: the deleted account's session no longer works", http(r));
     r = await api("GET", "/api/users/u_e2e_delete");

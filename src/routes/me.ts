@@ -1,5 +1,5 @@
 import { Env, json } from "../env";
-import { currentUser, providers } from "../auth";
+import { clearSessionCookie, currentUser, originMatches, providers } from "../auth";
 import { deleteAccount } from "../moderation";
 
 export async function meRoutes(req: Request, env: Env, url: URL): Promise<Response | null> {
@@ -31,11 +31,11 @@ export async function meRoutes(req: Request, env: Env, url: URL): Promise<Respon
 
   // Someone deletes their own account
   if (path === "/api/me" && req.method === "DELETE") {
-    if (req.headers.get("origin") !== url.origin) return json({ error: "Bad request" }, { status: 400 });
+    if (!originMatches(req, url)) return json({ error: "Bad request" }, { status: 400 });
     const u = await currentUser(req, env);
     if (!u) return json({ error: "Sign in first." }, { status: 401 });
     const res = await deleteAccount(env, u);
-    res.headers.append("set-cookie", `th_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${url.protocol === "https:" ? "; Secure" : ""}`);
+    res.headers.append("set-cookie", clearSessionCookie(url));
     return res;
   }
 

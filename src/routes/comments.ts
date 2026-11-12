@@ -1,5 +1,5 @@
 import { Env, json } from "../env";
-import { allow, currentUser, sameOrigin } from "../auth";
+import { allow, currentUser, originMatches, sameOrigin } from "../auth";
 import { addComment, deleteComment, listComments } from "../stories";
 
 export async function commentRoutes(req: Request, env: Env, url: URL): Promise<Response | null> {
@@ -16,7 +16,7 @@ export async function commentRoutes(req: Request, env: Env, url: URL): Promise<R
   }
   const cd = path.match(/^\/api\/comments\/([A-Za-z0-9_]{1,40})$/);
   if (cd && req.method === "DELETE") {
-    if (req.headers.get("origin") !== url.origin) return json({ error: "Bad request" }, { status: 400 });
+    if (!originMatches(req, url)) return json({ error: "Bad request" }, { status: 400 });
     const u = await currentUser(req, env);
     if (!u) return json({ error: "Sign in first." }, { status: 401 });
     return deleteComment(env, cd[1], u);
