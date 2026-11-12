@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGithubJobs } from "../../src/github-jobs";
+import worker from "../../src/index";
+import { CRON_JOBS } from "../../src/routes/cron-jobs";
 import { env, HOUR, DAY } from "./helpers";
 
 const withToken = { ...env, GITHUB_ACTIONS_TOKEN: "test-token" };
@@ -55,5 +57,23 @@ describe("starting the GitHub jobs", () => {
   it("never puts the token in what it reports", async () => {
     status = () => 403;
     await expect(startGithubJobs(withToken, START)).rejects.not.toThrow(/test-token/);
+  });
+});
+
+describe("the cron's job list", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("has the seven jobs, in the order the cron has always run them", () => {
+    expect(CRON_JOBS.map(j => j.key)).toEqual(["weather", "alerts", "events", "stages", "transit schedule", "GitHub jobs", "clean-up"]);
+  });
+  it("is what the cron runs, and each job's failures are counted under its key", async () => {
+    vi.stubGlobal("fetch", async () => { throw new Error("no network in this test"); });
+    await worker.scheduled({} as ScheduledController, env);
+    const row = await env.DB.prepare("SELECT body FROM feeds WHERE name = 'cron-health'").first<{ body: string }>();
+    const fails = JSON.parse(row!.body) as Record<string, number>;
+    expect(Object.keys(fails)).toEqual(CRON_JOBS.map(j => j.key));
+    // Weather and warnings need the network, and no library events have arrived; the rest can't fail here
+    expect(fails).toMatchObject({ weather: 1, alerts: 1, events: 1, stages: 0, "GitHub jobs": 0, "clean-up": 0 });
+    expect([0, 1]).toContain(fails["transit schedule"]); // fails only in the last week of the map's schedule
   });
 });
