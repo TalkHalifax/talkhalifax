@@ -1,0 +1,100 @@
+# Deploys TalkHalifax to Cloudflare on every push to main (and on demand, from main only).
+# Pull requests get the checks and tests only; a failure in either stops the deploy.
+#
+# Needs one repository secret: CLOUDFLARE_API_TOKEN, a Cloudflare API token with
+#   Account › Workers Scripts › Edit   and   Account › D1 › Edit
+# The account id is in wrangler.jsonc.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["README.md"]
+  pull_request:
+    paths-ignore: ["README.md"]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one instead of cancelling it mid-migration
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Client script parses
+        run: for f in public/app.js public/api.js public/chat.js public/views/*.js public/events.js public/alerts.js public/transit.js public/stats.js admin/public/admin.js; do node --check "$f"; done
+      - name: Type check the tests
+        run: npx tsc -p test
+      - name: Unit tests
+        run: npm test
+      - name: Agent guard tests
+        run: npm run test:hooks
+      # Drafts of protected files must be promoted (npm run drafts:promote) before they reach main
+      - name: No unpromoted drafts
+        run: test -z "$(git ls-files protected-drafts | grep -v '^protected-drafts/README.md$')"
+      # The real site in a real browser (the runner's Chrome), against a local Worker with throwaway data
+      - name: Browser check
+        run: npm run test:e2e
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply database migrations
+        run: npx wrangler d1 migrations apply talkhalifax --remote
+      - name: Deploy
+        run: npx wrangler deploy
+      # Load the live site. If it's broken, go back to the previous version (database migrations stay applied)
+      - name: Smoke test
+        id: smoke
+        run: |
+          B=https://talkhalifax.alexwmmolloy.workers.dev
+          check() {
+            curl -sf -m 20 "$B/" | grep -q TalkHalifax &&
+            curl -sf -m 20 "https://talkhalifax.ca/" | grep -q TalkHalifax &&
+            curl -sf -m 20 "$B/api/stories" | grep -q '"stories"' &&
+            curl -sf -m 20 "$B/api/alerts" | grep -q '"alerts"'
+          }
+          for i in 1 2 3 4 5; do
+            if check; then echo "Site is up"; exit 0; fi
+            echo "Attempt $i failed"; sleep 10
+          done
+          exit 1
+      - name: Roll back
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: npx wrangler rollback --yes --message "Smoke test failed for ${GITHUB_SHA::7}"
+      # The admin site, once the main site is known to be fine. A problem here turns the run red but leaves the main site alone.
+      - name: Deploy the admin site
+        run: npx wrangler deploy --config admin/wrangler.jsonc
+      # A 200 without signing in would mean the admin site is open to anyone. No answer is fine until its address is set up.
+      - name: Check the admin site refuses strangers
+        run: |
+          for path in / /admin.js /api/users; do
+            code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://admin.talkhalifax.ca$path" || true)
+            echo "admin.talkhalifax.ca$path answered HTTP $code"
+            if [ "$code" = "200" ]; then echo "::error::The admin site answered $path without a sign-in. Check its sign-in."; exit 1; fi
+          done
