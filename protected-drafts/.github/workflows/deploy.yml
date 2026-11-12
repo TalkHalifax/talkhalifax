@@ -14,10 +14,10 @@ on:
     paths-ignore: ["README.md"]
   workflow_dispatch:
 
-# One deploy at a time; a newer push waits for the running one instead of cancelling it mid-migration
+# Pull request runs: a newer push cancels the older run. Everything else (main): one at a time, never cancelled mid-migration.
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
