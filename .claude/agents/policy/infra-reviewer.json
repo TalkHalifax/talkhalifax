@@ -1,0 +1,23 @@
+{
+  "agent": "infra-reviewer",
+  "level": "L3",
+  "tools": ["Read", "Glob", "Grep", "Bash", "TaskStop", "WebFetch"],
+  "edit": { "allow": [], "deny": [] },
+  "bash": [
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "*"],
+    ["git", "diff", "--stat"],
+    ["git", "diff", "*", "--stat"],
+    ["git", "diff", "--name-status", "*"],
+    ["git", "diff", "*", "--", "re:^[A-Za-z0-9._/-]+$"],
+    ["git", "log", "--oneline", "-20"],
+    ["git", "diff", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
+    ["git", "diff", "--stat", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
+    ["git", "diff", "--name-status", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
+    ["git", "show", "re:^origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+:(\\.github|[A-Za-z0-9_-][A-Za-z0-9._-]*)(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
+    ["git", "log", "--oneline", "re:^origin/main\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "docs.github.com"]
+}
