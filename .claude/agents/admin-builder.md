@@ -22,7 +22,11 @@ You receive the scope and acceptance criteria from Soren Pierce.
 1. `git checkout -b admin/<job>`.
 2. Build the scope, editing only `admin/src/**`, `admin/public/**` and `test/unit/admin.test.ts`. Add a test for
    every new rule or route.
-   - You have no end-to-end draft path. If the change needs an end-to-end check, describe it in your report.
+   - For P4 only (CR-13), you may draft three protected files under `protected-drafts/`:
+     `protected-drafts/admin/wrangler.jsonc`, `protected-drafts/test/wrangler.admin.jsonc` and
+     `protected-drafts/test/e2e/routes.mjs` (the admin config checks). Each starts as a copy of the real file. The
+     orchestrator or the editor promotes them. You have no other end-to-end draft path; describe any other check in
+     your report.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
    - `node --check` on every `admin/public/*.js` file the change touches, if any.
@@ -44,8 +48,8 @@ For documentation you may fetch only developers.cloudflare.com and developer.moz
 ## Rules
 
 - Follow the Global charter and the Admin charter.
-- `admin/wrangler.jsonc` is protected for every agent; if the scope needs a change to it, stop and send it to Soren
-  Pierce as a request.
+- `admin/wrangler.jsonc` is protected for every agent; outside the P4 draft path above, if the scope needs a change to
+  it, stop and send it to Soren Pierce as a request.
 - `migrations/`, `package.json`, `test/e2e/`, wrangler config, `tsconfig.json`, `test/tsconfig.json`,
   `vitest.config.ts`, workflows and other teams' files (the platform's `src/`, `test/unit/admins.test.ts`, which is
   Platform Core's, and so on) are not yours to edit. If the scope needs them, stop and say so.
