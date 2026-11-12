@@ -57,7 +57,8 @@ async function passwordGate(req: Request, env: AdminEnv, url: URL, now: number):
     if (req.method !== "POST") return new Response("Not allowed", { status: 405, headers: { allow: "GET, POST" } });
     if (!sameOrigin(req, url)) return new Response("Bad request", { status: 403 });
     const ip = req.headers.get("cf-connecting-ip") || "unknown";
-    if (env.LOGIN_LIMIT && !(await env.LOGIN_LIMIT.limit({ key: ip })).success) return loginPage("Too many tries. Wait a minute, then try again.", 429);
+    if (!env.LOGIN_LIMIT) return loginPage("Sign-in is switched off until it's set up properly.", 503);
+    if (!(await env.LOGIN_LIMIT.limit({ key: ip })).success) return loginPage("Too many tries. Wait a minute, then try again.", 429);
     const form = await readForm(req);
     if (!form) return loginPage("That didn't work. Try again.", 413);
     if (!await rightCredentials(env, form.get("user") || "", form.get("password") || "")) return loginPage("That username and password don't match.", 401);

@@ -126,7 +126,8 @@ describe("the admin site's front door", () => {
 
 describe("signing in with a username and password", () => {
   const USER = "editor", PASSWORD = "a-long-test-password-123";
-  const withPassword = (extra: Partial<AdminEnv> = {}): AdminEnv => ({ DB: env.DB, ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, ...extra });
+  const allowAll = { limit: async () => ({ success: true }) };
+  const withPassword = (extra: Partial<AdminEnv> = {}): AdminEnv => ({ DB: env.DB, ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, LOGIN_LIMIT: allowAll, ...extra });
   const SITE = "https://admin.talkhalifax.ca";
   const signIn = (user: string, password: string, e = withPassword(), headers: Record<string, string> = { origin: SITE }) =>
     handle(req("/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ user, password }).toString() }), e, NOW);
@@ -193,6 +194,62 @@ describe("signing in with a username and password", () => {
     expect(r.status).toBe(429);
     expect(r.headers.get("set-cookie")).toBeNull();
     expect(keys).toEqual(["203.0.113.5"]);
+  });
+  const SWITCHED_OFF = "Sign-in is switched off until it's set up properly.";
+  it("refuses every sign-in when the attempt limit isn't set up, right or wrong", async () => {
+    const e = withPassword({ LOGIN_LIMIT: undefined });
+    const right = await signIn(USER, PASSWORD, e), wrong = await signIn(USER, "wrong-password-but-long", e);
+    expect(right.status).toBe(503);
+    expect(right.headers.get("set-cookie")).toBeNull();
+    const body = await right.text();
+    expect(body).toContain(SWITCHED_OFF);
+    expect(wrong.status).toBe(right.status);
+    expect(await wrong.text()).toBe(body);
+    expect(wrong.headers.get("set-cookie")).toBeNull();
+  });
+  it("checks the attempt limit by address and signs in when under it", async () => {
+    const keys: string[] = [];
+    const e = withPassword({ LOGIN_LIMIT: { limit: async (o: { key: string }) => { keys.push(o.key); return { success: true }; } } });
+    const r = await signIn(USER, PASSWORD, e, { origin: SITE, "cf-connecting-ip": "203.0.113.5" });
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/");
+    const set = r.headers.get("set-cookie") || "";
+    for (const flag of ["__Host-th-admin=", "HttpOnly", "Secure", "SameSite=Strict", "Path=/"]) expect(set).toContain(flag);
+    expect(keys).toEqual(["203.0.113.5"]);
+    const wrong = await signIn(USER, "wrong-password-but-long", e, { origin: SITE, "cf-connecting-ip": "203.0.113.5" });
+    expect(wrong.status).toBe(401);
+    expect(wrong.headers.get("set-cookie")).toBeNull();
+  });
+  it("still says the site isn't set up when nothing is, attempt limit or not", async () => {
+    for (const e of [{ DB: env.DB, ASSETS: assets } as AdminEnv, withPassword({ ADMIN_PASSWORD: "short-password", LOGIN_LIMIT: undefined })]) {
+      const r = await signIn(USER, PASSWORD, e);
+      expect(r.status).toBe(503);
+      const body = await r.text();
+      expect(body).toContain("The admin site isn't set up yet");
+      expect(body).not.toContain(SWITCHED_OFF);
+    }
+  });
+  it("leaves Access alone when the attempt limit is missing", async () => {
+    const both = { ...withPassword({ LOGIN_LIMIT: undefined }), ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD };
+    expect((await handle(req("/", { headers: { "cf-access-jwt-assertion": await token() } }), both, NOW)).status).toBe(200);
+    expect((await signIn(USER, PASSWORD, both)).status).toBe(403);
+  });
+  it("still shows the sign-in form when the attempt limit is missing", async () => {
+    const r = await handle(req("/login"), withPassword({ LOGIN_LIMIT: undefined }), NOW);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain('action="/login"');
+  });
+  it("sends the security headers when sign-in is switched off", async () => {
+    const r = await signIn(USER, PASSWORD, withPassword({ LOGIN_LIMIT: undefined }));
+    expect(r.status).toBe(503);
+    const csp = r.headers.get("content-security-policy") || "";
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("form-action 'self'");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(r.headers.get("referrer-policy")).toBe("same-origin");
+  });
+  it("refuses a sign-in from another site before anything else, attempt limit or not", async () => {
+    expect((await signIn(USER, PASSWORD, withPassword({ LOGIN_LIMIT: undefined }), { origin: "https://evil.test" })).status).toBe(403);
   });
   it("refuses an oversized sign-in form", async () => {
     const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(`user=${"x".repeat(5000)}`)); c.close(); } });
