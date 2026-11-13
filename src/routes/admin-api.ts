@@ -306,12 +306,15 @@ const searchText = (q: unknown, max: number) => q === undefined ? "" : typeof q 
 /** One of the allowed values, the first ("all") when missing, null for anything else. */
 const oneOf = <T extends string>(x: unknown, allowed: T[]): T | null => x === undefined ? allowed[0] : typeof x === "string" && (allowed as string[]).includes(x) ? x as T : null;
 
+/** The furthest a users page may start: far past any real member count, but it stops a caller asking D1 to skip billions of rows. */
+const MAX_OFFSET = 100_000;
+
 /** The users arguments checked, or null to refuse. */
 export function usersArgs(args: unknown): UsersArgs | null {
   const a = argsObject(args);
   if (!a) return null;
   const q = searchText(a.q, 60), role = oneOf(a.role, ROLES);
-  const offset = a.offset === undefined ? 0 : typeof a.offset === "number" && Number.isSafeInteger(a.offset) && a.offset >= 0 ? a.offset : null;
+  const offset = a.offset === undefined ? 0 : typeof a.offset === "number" && Number.isSafeInteger(a.offset) && a.offset >= 0 && a.offset <= MAX_OFFSET ? a.offset : null;
   return q === null || role === null || offset === null ? null : { q, role, offset };
 }
 
