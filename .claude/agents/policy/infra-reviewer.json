@@ -13,11 +13,11 @@
     ["git", "diff", "--name-status", "*"],
     ["git", "diff", "*", "--", "re:^[A-Za-z0-9._/-]+$"],
     ["git", "log", "--oneline", "-20"],
-    ["git", "diff", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
-    ["git", "diff", "--stat", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
-    ["git", "diff", "--name-status", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"],
-    ["git", "show", "re:^origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+:(\\.github|[A-Za-z0-9_-][A-Za-z0-9._-]*)(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
-    ["git", "log", "--oneline", "re:^origin/main\\.\\.origin/(events|platform|site|trust|agent-ops)/[a-z0-9._-]+$"]
+    ["git", "diff", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops|admin)/[a-z0-9._-]+$"],
+    ["git", "diff", "--stat", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops|admin)/[a-z0-9._-]+$"],
+    ["git", "diff", "--name-status", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|agent-ops|admin)/[a-z0-9._-]+$"],
+    ["git", "show", "re:^origin/(events|platform|site|trust|agent-ops|admin)/[a-z0-9._-]+:(\\.github|[A-Za-z0-9_-][A-Za-z0-9._-]*)(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
+    ["git", "log", "--oneline", "re:^origin/main\\.\\.origin/(events|platform|site|trust|agent-ops|admin)/[a-z0-9._-]+$"]
   ],
   "webfetch": ["developers.cloudflare.com", "docs.github.com"]
 }

@@ -24,8 +24,9 @@
     ["npx", "tsc", "-p", "test"],
     ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
     ["npx", "wrangler", "dev"],
-    ["git", "diff", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust)/[a-z0-9._-]+$"],
-    ["git", "diff", "--stat", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust)/[a-z0-9._-]+$"],
-    ["git", "show", "re:^origin/(events|platform|site|trust)/[a-z0-9._-]+:[A-Za-z0-9._/-]+$"]
+    ["git", "diff", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|admin)/[a-z0-9._-]+$"],
+    ["git", "diff", "--stat", "re:^origin/main\\.\\.\\.origin/(events|platform|site|trust|admin)/[a-z0-9._-]+$"],
+    ["git", "show", "re:^origin/(events|platform|site|trust|admin)/[a-z0-9._-]+:[A-Za-z0-9._/-]+$"],
+    ["git", "log", "--oneline", "re:^origin/main\\.\\.origin/(events|platform|site|trust|admin)/[a-z0-9._-]+$"]
   ]
 }

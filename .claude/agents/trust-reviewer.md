@@ -33,10 +33,11 @@ checked out.
 ### Other teams' pull requests
 
 You receive the other team's branch name and the concerns to check. Without checking it out, read the branch with
-`git diff origin/main...origin/<branch>` and `git show origin/<branch>:<path>`. The orchestrator fetches the branch
-before the review. If `origin/<branch>` isn't there, stop and say so.
+`git diff origin/main...origin/<branch>` and `git show origin/<branch>:<path>`, and list its commits with
+`git log --oneline origin/main..origin/<branch>`. The orchestrator fetches the branch before the review. If
+`origin/<branch>` isn't there, stop and say so.
 
-The branch must be an `events/`, `platform/`, `site/` or `trust/` branch. The owning team and CI run its tests; you
+The branch must be an `events/`, `platform/`, `site/`, `trust/` or `admin/` branch. The owning team and CI run its tests; you
 don't. Check it against the security checklist and the concerns you were given.
 
 ### Security checklist
