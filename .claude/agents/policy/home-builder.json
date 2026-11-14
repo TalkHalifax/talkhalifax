@@ -1,0 +1,27 @@
+{
+  "agent": "home-builder",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
+  "edit": {
+    "allow": ["public/views/home.js"],
+    "deny": []
+  },
+  "bash": [
+    ["npm", "test"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["node", "--check", "re:^public/[a-z0-9-]+(/[a-z0-9-]+)*\\.js$"],
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "--stat"],
+    ["git", "branch", "--show-current"],
+    ["git", "checkout", "-b", "re:^home/[a-z0-9._-]+$"],
+    ["git", "add", "public/views/home.js"],
+    ["git", "commit", "-m", "*"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
+}
