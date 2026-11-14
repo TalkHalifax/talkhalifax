@@ -16,7 +16,7 @@ You receive the scope and acceptance criteria from Andrew Dyer.
 
 1. `git checkout -b site/<job>`.
 2. Build the scope, editing only `public/app.js`, `public/index.html`, `public/sw.js`, `public/manifest.webmanifest`,
-   `public/icons/**`, `public/styles.css`, `public/views/**`, `public/api.js`, `public/chat.js` and
+   `public/icons/**`, `public/styles.css`, `public/views/**` (except `public/views/home.js`, Home's), `public/api.js`, `public/chat.js` and
    `docs/DESIGN-SYSTEM.md`. Follow the design system. Add a test for every new rule or page.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change at phone

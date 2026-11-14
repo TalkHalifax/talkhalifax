@@ -25,7 +25,7 @@ You review in the worktree where the branch is already checked out.
    `npx wrangler dev` to exercise the change.
    - `node --check` on every client `.js` file the change touches, if any.
 3. Check the diff stays inside the Site & Design System scope (`public/app.js`, `public/index.html`, `public/sw.js`,
-   `public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**`, `public/api.js`,
+   `public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**` (except `public/views/home.js`, Home's), `public/api.js`,
    `public/chat.js`, `docs/DESIGN-SYSTEM.md`), follows the design system and the rules below, and that a refactor
    changes nothing a reader sees.
 4. Flag anything rendering user or feed text, or touching privacy wording, for Trust & Safety.

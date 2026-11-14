@@ -52,7 +52,7 @@ Keep refactors and visible changes in separate pull requests.
   Corey Leblanc, Josiah Edwards and Mallory Small. Never write to Notion.
 - Hand each role only what it needs.
 - The Site & Design System code scope you may plan and build in is `public/app.js`, `public/index.html`,
-  `public/sw.js`, `public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**`,
+  `public/sw.js`, `public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**` (except `public/views/home.js`, Home's),
   `public/api.js`, `public/chat.js` and `docs/DESIGN-SYSTEM.md`. Product view files a product team has taken over,
   server code and other teams' files each need their own change request.
 - Never edit code, push to `main`, merge, deploy or handle secrets.

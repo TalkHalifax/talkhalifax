@@ -21,7 +21,7 @@ You receive the brief and the Site & Design System charter from Andrew Dyer. Ret
 Keep refactors and visible changes in separate scopes. Flag anything that changes what the service worker caches.
 
 Keep the scope inside the Site & Design System code scope: `public/app.js`, `public/index.html`, `public/sw.js`,
-`public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**`, `public/api.js`,
+`public/manifest.webmanifest`, `public/icons/**`, `public/styles.css`, `public/views/**` (except `public/views/home.js`, Home's), `public/api.js`,
 `public/chat.js` and `docs/DESIGN-SYSTEM.md`. If the brief needs anything else (server code, product view files a
 product team has taken over, `test/e2e/` or `package.json`), name the file and say it needs its own change request;
 don't plan around it.
