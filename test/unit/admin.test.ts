@@ -1,7 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createExecutionContext } from "cloudflare:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi, type Mock } from "vitest";
 import { forgetKeys, validAccessToken } from "../../admin/src/access";
-import { AdminEnv, buckets, handle, screenOf } from "../../admin/src/index";
-import { DAY, env, HOUR, iso, makeStory, makeUser } from "./helpers";
+import { AdminEnv, handle } from "../../admin/src/index";
+import { AdminApi, contentArgs, usersArgs } from "../../src/routes/admin-api";
+import { DAY, env, HOUR, iso, makeStory, makeUser, seedAdminData } from "./helpers";
 
 const TEAM = "team.cloudflareaccess.com", AUD = "aud-1", NOW = Date.UTC(2026, 10, 7, 12);
 const SECONDS = NOW / 1000;
@@ -17,11 +19,45 @@ async function token(claims: Record<string, unknown> = {}, opts: { key?: CryptoK
   return `${head}.${body}.${b64(sig)}`;
 }
 
+// ---------- stand-ins for PLATFORM ----------
+
+type Platform = AdminEnv["PLATFORM"];
+const METHODS = ["summary", "overview", "users", "content", "dataSources", "jobs"] as const;
+type Method = typeof METHODS[number];
+
+/** The platform's real AdminApi, called directly, on the test database. */
+const realPlatform = (): Platform => new AdminApi(createExecutionContext(), env) as unknown as Platform;
+
+/** What each recording method answers: fixed values, nothing like the real data, so a passed-through body is plain to see. */
+const FIXED: Record<Method, unknown> = {
+  summary: { members: 41, fixed: "summary" },
+  overview: { range: "7d", labels: ["fixed"], fixed: "overview" },
+  users: { users: [{ id: "fixed-user" }], total: 1, pageSize: 100 },
+  content: { items: [{ id: "fixed-item" }], total: 1, limit: 321 },
+  dataSources: { feeds: [], sources: [{ name: "fixed" }] },
+  jobs: { jobs: [{ name: "fixed job" }] },
+};
+
+/** Six vi.fn, each answering its FIXED value. */
+function recording() {
+  const fns = Object.fromEntries(METHODS.map(m => [m, vi.fn(async (..._args: unknown[]) => FIXED[m])])) as Record<Method, Mock<(...args: unknown[]) => Promise<unknown>>>;
+  const calls = () => METHODS.reduce((n, m) => n + fns[m].mock.calls.length, 0);
+  return { fns, calls, platform: fns as unknown as Platform };
+}
+
+/** Every method rejects with the error made by `make` (a message makes a plain Error). */
+const throwing = (make: string | (() => unknown)): Platform =>
+  Object.fromEntries(METHODS.map(m => [m, async () => { throw typeof make === "string" ? new Error(make) : make(); }])) as unknown as Platform;
+
 const assets = { fetch: async () => new Response("<!doctype html>the page", { headers: { "content-type": "text/html" } }) } as unknown as Fetcher;
-const configured = (): AdminEnv => ({ DB: env.DB, ASSETS: assets, ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD });
+const configured = (platform: Platform = realPlatform()): AdminEnv => ({ PLATFORM: platform, ASSETS: assets, ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD });
 const req = (path: string, init: RequestInit = {}, host = "https://admin.talkhalifax.ca") => new Request(host + path, init);
-const asDev = (path: string) => handle(req(path, {}, "http://localhost:8790"), { DB: env.DB, ASSETS: assets, ADMIN_DEV: "1" }, NOW);
+const asDev = (path: string, platform: Platform = realPlatform()) => handle(req(path, {}, "http://localhost:8790"), { PLATFORM: platform, ASSETS: assets, ADMIN_DEV: "1" }, NOW);
 const data = async <T = any>(path: string) => (await asDev(path)).json() as Promise<T>;
+const plain = (x: unknown) => JSON.parse(JSON.stringify(x));
+
+/** The methods use Date.now(), so the data tests pin it to NOW. */
+const freezeClock = () => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(NOW); };
 
 beforeAll(async () => {
   keys = await newKeys();
@@ -35,10 +71,11 @@ beforeEach(() => {
     return Response.json({ keys: [jwk] });
   });
 });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("the admin site's front door", () => {
   it("refuses everyone when Access isn't configured, pages and data alike", async () => {
-    const bare: AdminEnv = { DB: env.DB, ASSETS: assets };
+    const bare: AdminEnv = { PLATFORM: realPlatform(), ASSETS: assets };
     for (const path of ["/", "/admin.js", "/api/users"]) expect((await handle(req(path), bare, NOW)).status).toBe(503);
     expect((await handle(req("/"), { ...bare, ACCESS_TEAM_DOMAIN: TEAM }, NOW)).status).toBe(503);
   });
@@ -107,7 +144,7 @@ describe("the admin site's front door", () => {
     expect(await validAccessToken(await token(), TEAM, AUD, NOW + 62_000)).toBe(true);
   });
   it("only skips the check for a local run, never on the real address", async () => {
-    const dev: AdminEnv = { DB: env.DB, ASSETS: assets, ADMIN_DEV: "1" };
+    const dev: AdminEnv = { PLATFORM: realPlatform(), ASSETS: assets, ADMIN_DEV: "1" };
     expect((await handle(req("/", {}, "http://localhost:8790"), dev, NOW)).status).toBe(200);
     expect((await handle(req("/", {}, "https://admin.talkhalifax.ca"), dev, NOW)).status).toBe(503);
   });
@@ -127,7 +164,7 @@ describe("the admin site's front door", () => {
 describe("signing in with a username and password", () => {
   const USER = "editor", PASSWORD = "a-long-test-password-123";
   const allowAll = { limit: async () => ({ success: true }) };
-  const withPassword = (extra: Partial<AdminEnv> = {}): AdminEnv => ({ DB: env.DB, ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, LOGIN_LIMIT: allowAll, ...extra });
+  const withPassword = (extra: Partial<AdminEnv> = {}): AdminEnv => ({ PLATFORM: realPlatform(), ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, LOGIN_LIMIT: allowAll, ...extra });
   const SITE = "https://admin.talkhalifax.ca";
   const signIn = (user: string, password: string, e = withPassword(), headers: Record<string, string> = { origin: SITE }) =>
     handle(req("/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ user, password }).toString() }), e, NOW);
@@ -221,7 +258,7 @@ describe("signing in with a username and password", () => {
     expect(wrong.headers.get("set-cookie")).toBeNull();
   });
   it("still says the site isn't set up when nothing is, attempt limit or not", async () => {
-    for (const e of [{ DB: env.DB, ASSETS: assets } as AdminEnv, withPassword({ ADMIN_PASSWORD: "short-password", LOGIN_LIMIT: undefined })]) {
+    for (const e of [{ PLATFORM: realPlatform(), ASSETS: assets } as AdminEnv, withPassword({ ADMIN_PASSWORD: "short-password", LOGIN_LIMIT: undefined })]) {
       const r = await signIn(USER, PASSWORD, e);
       expect(r.status).toBe(503);
       const body = await r.text();
@@ -281,6 +318,8 @@ describe("signing in with a username and password", () => {
 });
 
 describe("what the admin site shows", () => {
+  beforeEach(freezeClock);
+
   it("never returns email addresses, password hashes, personas or Google ids", async () => {
     await makeUser("u_pw", { provider_sub: "nora", name: "Nora" });
     await makeUser("u_goog", { provider: "google", provider_sub: "google-sub-123", name: "Gia" });
@@ -308,10 +347,15 @@ describe("what the admin site shows", () => {
     expect((await data("/api/users?role=banned")).users.map((u: any) => u.id)).toEqual(["u_x"]);
     expect((await data("/api/users")).users.find((u: any) => u.id === "u_n").messages).toBe(1);
   });
-  it("puts each story on the screen readers see it on", () => {
-    expect(screenOf("article", "developing")).toBe("Developing");
-    expect(screenOf("article", "archived")).toBe("Articles");
-    expect(screenOf("notice", "developing")).toBe("Notices");
+  it("puts each story on the screen readers see it on", async () => {
+    await makeStory("c-dev", { headline: "Developing one" });
+    await makeStory("c-arch", { headline: "Archived one" }, { stage: "archived" });
+    await makeStory("c-note", { kind: "notice", headline: "A notice" });
+    const { items } = await data("/api/content");
+    const screen = (id: string) => items.find((i: any) => i.id === id).screen;
+    expect(screen("c-dev")).toBe("Developing");
+    expect(screen("c-arch")).toBe("Articles");
+    expect(screen("c-note")).toBe("Notices");
   });
   it("lists stories and upcoming events, not discarded ones, and links only what's public", async () => {
     await makeStory("c-dev", { headline: "Developing one" });
@@ -355,22 +399,24 @@ describe("what the admin site shows", () => {
 });
 
 describe("the charts", () => {
-  it("makes 24 hourly buckets ending now, labelled in Halifax time", () => {
-    const b = buckets("24h", NOW);
-    expect(b.labels).toHaveLength(24);
-    expect(b.labels[23]).toBe("8 am"); // noon UTC is 8 a.m. in Halifax (AST) on Nov. 7
+  beforeEach(freezeClock);
+
+  it("makes 24 hourly buckets ending now, labelled in Halifax time", async () => {
+    const o = await data("/api/overview?range=24h");
+    expect(o.labels).toHaveLength(24);
+    expect(o.labels[23]).toBe("8 am"); // noon UTC is 8 a.m. in Halifax (AST) on Nov. 7
   });
-  it("makes Halifax days, with today last", () => {
-    const b = buckets("7d", NOW);
-    expect(b.labels).toHaveLength(7);
-    expect(b.labels[6]).toBe("Nov. 7");
-    expect(b.labels[0]).toBe("Nov. 1");
+  it("makes Halifax days, with today last", async () => {
+    const o = await data("/api/overview?range=7d");
+    expect(o.labels).toHaveLength(7);
+    expect(o.labels[6]).toBe("Nov. 7");
+    expect(o.labels[0]).toBe("Nov. 1");
   });
-  it("gets through the day the clocks change", () => {
-    const fallBack = Date.UTC(2026, 10, 2, 12); // the day after clocks went back on Nov. 1, 2026
-    const b = buckets("7d", fallBack);
-    expect(b.labels).toHaveLength(7);
-    expect(new Set(b.labels).size).toBe(7);
+  it("gets through the day the clocks change", async () => {
+    vi.setSystemTime(Date.UTC(2026, 10, 2, 12)); // the day after clocks went back on Nov. 1, 2026
+    const o = await data("/api/overview?range=7d");
+    expect(o.labels).toHaveLength(7);
+    expect(new Set(o.labels).size).toBe(7);
   });
   it("adds up sign-ups and messages, and takes the peak for people online", async () => {
     await makeUser("u_new", { created_at: NOW - HOUR });
@@ -407,5 +453,235 @@ describe("the charts", () => {
   });
   it("falls back to 7 days for an unknown range", async () => {
     expect((await data("/api/overview?range=forever")).range).toBe("7d");
+  });
+});
+
+// ---------- the data comes only through PLATFORM ----------
+
+const ROUTES: [string, Method][] = [
+  ["/api/summary", "summary"], ["/api/overview", "overview"], ["/api/users", "users"],
+  ["/api/content", "content"], ["/api/data", "dataSources"], ["/api/jobs", "jobs"],
+];
+
+/** Calls one route with a recording PLATFORM and gives back what the named method was passed. */
+async function argsFor(path: string, method: Method) {
+  const r = recording();
+  const res = await asDev(path, r.platform);
+  expect(res.status, path).toBe(200);
+  expect(r.fns[method], path).toHaveBeenCalledTimes(1);
+  expect(r.calls(), path).toBe(1);
+  return { arg: r.fns[method].mock.calls[0][0], body: await res.json() };
+}
+
+describe("each route is one call to PLATFORM", () => {
+  it("calls exactly its own method, once, and answers what it gave back", async () => {
+    for (const [path, method] of ROUTES) {
+      const r = recording();
+      const res = await asDev(path, r.platform);
+      expect(res.status, path).toBe(200);
+      for (const m of METHODS) expect(r.fns[m], `${path} ${m}`).toHaveBeenCalledTimes(m === method ? 1 : 0);
+      expect(await res.json(), path).toEqual(FIXED[method]);
+    }
+  });
+  it("answers an unknown route 404 without calling anything", async () => {
+    const r = recording();
+    const res = await asDev("/api/nope", r.platform);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+    expect(r.calls()).toBe(0);
+  });
+});
+
+describe("the users arguments", () => {
+  const users = async (qs: string) => {
+    const { arg } = await argsFor(`/api/users${qs}`, "users");
+    expect(usersArgs(arg), qs).not.toBeNull(); // AdminApi's own check accepts it
+    return arg;
+  };
+  it("defaults to everyone, from the start", async () => {
+    expect(await users("")).toStrictEqual({ q: "", role: "all", offset: 0 });
+  });
+  it("passes the search on as typed, for AdminApi to trim and lowercase", async () => {
+    expect(await users("?q=%20Harb%20&role=moderator&offset=200")).toStrictEqual({ q: " Harb ", role: "moderator", offset: 200 });
+  });
+  it("treats an unknown role as everyone, including names on every object", async () => {
+    for (const role of ["", "admin", "Member", "constructor", "__proto__", "toString"])
+      expect((await users(`?role=${role}`) as { role: string }).role, role).toBe("all");
+    for (const role of ["all", "member", "moderator", "journalist", "banned"])
+      expect((await users(`?role=${role}`) as { role: string }).role, role).toBe(role);
+  });
+  it("makes the offset a whole number from 0 to 100,000", async () => {
+    const cases: [string, number][] = [
+      ["", 0], ["abc", 0], ["-5", 0], ["NaN", 0], ["%207%20", 7], ["1e3", 1000], ["2.7", 2],
+      ["100000", 100000], ["100001", 100000], ["1e9", 100000], ["Infinity", 100000],
+    ];
+    for (const [given, want] of cases) expect((await users(`?offset=${given}`) as { offset: number }).offset, given).toBe(want);
+  });
+});
+
+describe("the content arguments", () => {
+  const SCREENS = ["all", "Developing", "Articles", "Notices", "Events"], STATUSES = ["all", "waiting", "active", "archived"];
+  it("defaults to everything", async () => {
+    const { arg } = await argsFor("/api/content", "content");
+    expect(arg).toStrictEqual({ screen: "all", status: "all", q: "" });
+    expect(contentArgs(arg)).not.toBeNull();
+  });
+  it("passes known screens and statuses, and the search, straight through", async () => {
+    for (const screen of SCREENS) for (const status of STATUSES) {
+      const { arg, body } = await argsFor(`/api/content?screen=${screen}&status=${status}&q=%20Bridge%20`, "content");
+      expect(arg).toStrictEqual({ screen, status, q: " Bridge " });
+      expect(contentArgs(arg), `${screen} ${status}`).not.toBeNull();
+      expect(body).toEqual(FIXED.content);
+    }
+  });
+  it("answers an empty list for a screen or status it doesn't know, as it always has", async () => {
+    const cases: [string, object][] = [
+      ["?screen=Foo", { screen: "all", status: "all", q: "" }],
+      ["?screen=events", { screen: "all", status: "all", q: "" }],
+      ["?screen=constructor&status=active", { screen: "all", status: "active", q: "" }],
+      ["?status=deleted", { screen: "all", status: "all", q: "" }],
+      ["?screen=Events&status=__proto__&q=x", { screen: "Events", status: "all", q: "x" }],
+    ];
+    for (const [qs, want] of cases) {
+      const { arg, body } = await argsFor(`/api/content${qs}`, "content");
+      expect(arg, qs).toStrictEqual(want);
+      expect(contentArgs(arg), qs).not.toBeNull();
+      expect(body, qs).toStrictEqual({ items: [], total: 0, limit: 321 });
+    }
+  });
+});
+
+describe("the overview range", () => {
+  it("passes 24h, 7d and 30d, and makes anything else 7d", async () => {
+    for (const [qs, want] of [["", "7d"], ["?range=forever", "7d"], ["?range=24H", "7d"], ["?range=constructor", "7d"], ["?range=__proto__", "7d"],
+      ["?range=24h", "24h"], ["?range=7d", "7d"], ["?range=30d", "30d"]]) {
+      expect((await argsFor(`/api/overview${qs}`, "overview")).arg, qs).toBe(want);
+    }
+  });
+});
+
+describe("the routes answer what AdminApi answers", () => {
+  beforeEach(async () => {
+    await seedAdminData(NOW);
+    freezeClock();
+  });
+  it("for every route, with the arguments read from the address", async () => {
+    const real = realPlatform();
+    const cases: [string, () => Promise<unknown>][] = [
+      ["/api/summary", () => real.summary()],
+      ["/api/overview", () => real.overview("7d")],
+      ["/api/overview?range=24h", () => real.overview("24h")],
+      ["/api/overview?range=30d", () => real.overview("30d")],
+      ["/api/users", () => real.users({ q: "", role: "all", offset: 0 })],
+      ["/api/users?q=%20HARB%20", () => real.users({ q: " HARB ", role: "all", offset: 0 })],
+      ["/api/users?role=banned", () => real.users({ q: "", role: "banned", offset: 0 })],
+      ["/api/users?q=%25&offset=0", () => real.users({ q: "%", role: "all", offset: 0 })],
+      ["/api/users?offset=2", () => real.users({ q: "", role: "all", offset: 2 })],
+      ["/api/content", () => real.content({ screen: "all", status: "all", q: "" })],
+      ["/api/content?screen=Notices", () => real.content({ screen: "Notices", status: "all", q: "" })],
+      ["/api/content?status=archived&q=Council", () => real.content({ screen: "all", status: "archived", q: "Council" })],
+      ["/api/content?screen=Events", () => real.content({ screen: "Events", status: "all", q: "" })],
+      ["/api/data", () => real.dataSources()],
+      ["/api/jobs", () => real.jobs()],
+    ];
+    for (const [path, direct] of cases) {
+      const res = await asDev(path, real);
+      expect(res.status, path).toBe(200);
+      const body = await res.json();
+      expect(body, path).toEqual(plain(await direct()));
+    }
+    // and the seed shows up, so the comparison isn't empty against empty
+    expect((await data("/api/users")).users.length).toBeGreaterThan(0);
+    expect((await data("/api/content")).items.length).toBeGreaterThan(0);
+  });
+});
+
+describe("when PLATFORM fails", () => {
+  const SECRET = "D1_ERROR: no such column: email at offset 42 (SELECT email FROM users) nora.private@example.test";
+  const expectGeneric = async (res: Response, status: number, error: string, label: string) => {
+    expect(res.status, label).toBe(status);
+    const text = await res.text();
+    expect(text, label).toBe(JSON.stringify({ error }));
+    expect(res.headers.get("content-security-policy"), label).toContain("frame-ancestors 'none'");
+    expect(res.headers.get("cache-control"), label).toBe("no-store");
+    expect(res.headers.get("x-content-type-options"), label).toBe("nosniff");
+    return text;
+  };
+  beforeEach(() => { vi.spyOn(console, "error").mockImplementation(() => {}); });
+
+  it("answers its refusal of bad arguments as a 400, and nothing more", async () => {
+    for (const [path] of ROUTES) await expectGeneric(await asDev(path, throwing("Bad request")), 400, "Bad request", path);
+  });
+  it("answers its own failure as the usual 500", async () => {
+    for (const [path] of ROUTES) await expectGeneric(await asDev(path, throwing("Something went wrong")), 500, "Something went wrong", path);
+  });
+  it("never puts the thrown text in the answer", async () => {
+    for (const [path] of ROUTES) {
+      for (const [label, p] of [["detailed", throwing(SECRET)], ["TypeError", throwing(() => new TypeError(`cannot read ${SECRET}`))]] as const) {
+        const text = await expectGeneric(await asDev(path, p), 500, "Something went wrong", `${path} ${label}`);
+        for (const bit of ["D1_ERROR", "email", "nora.private", "column", "cannot read"]) expect(text).not.toContain(bit);
+      }
+    }
+  });
+  it("answers the usual 500 when PLATFORM isn't bound at all", async () => {
+    const unbound = { ASSETS: assets, ADMIN_DEV: "1" } as unknown as AdminEnv;
+    for (const [path] of ROUTES) await expectGeneric(await handle(req(path, {}, "http://localhost:8790"), unbound, NOW), 500, "Something went wrong", path);
+  });
+});
+
+describe("nothing reaches PLATFORM before the sign-in check", () => {
+  const USER = "editor", PASSWORD = "a-long-test-password-123", SITE = "https://admin.talkhalifax.ca";
+  const PATHS = [...ROUTES.map(([p]) => p), "/api/nope"];
+  it("makes no call for any refused request", async () => {
+    const r = recording();
+    const passwordEnv: AdminEnv = { PLATFORM: r.platform, ASSETS: assets, ADMIN_USER: USER, ADMIN_PASSWORD: PASSWORD, LOGIN_LIMIT: { limit: async () => ({ success: true }) } };
+    const login = await handle(req("/login", { method: "POST", headers: { origin: SITE, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ user: USER, password: PASSWORD }).toString() }), passwordEnv, NOW);
+    const cookie = (login.headers.get("set-cookie") || "").split(";")[0];
+    const [name, value] = cookie.split("="), [exp, sig] = value.split(".");
+    const good = await token(), forged = await token({}, { key: otherKeys.privateKey });
+
+    const cases: [string, AdminEnv, RequestInit, string, number, number?][] = [
+      ["unconfigured", { PLATFORM: r.platform, ASSETS: assets }, {}, SITE, 503],
+      ["Access, team only", { PLATFORM: r.platform, ASSETS: assets, ACCESS_TEAM_DOMAIN: TEAM }, { headers: { "cf-access-jwt-assertion": good } }, SITE, 503],
+      ["Access, audience only", { PLATFORM: r.platform, ASSETS: assets, ACCESS_AUD: AUD }, { headers: { "cf-access-jwt-assertion": good } }, SITE, 503],
+      ["Access, no token", configured(r.platform), {}, SITE, 403],
+      ["Access, forged token", configured(r.platform), { headers: { "cf-access-jwt-assertion": forged } }, SITE, 403],
+      ["password, no cookie", passwordEnv, {}, SITE, 401],
+      ["password, expired cookie", passwordEnv, { headers: { cookie } }, SITE, 401, NOW + 13 * HOUR],
+      ["password, tampered cookie", passwordEnv, { headers: { cookie: `${name}=${Number(exp) + 3_600_000}.${sig}` } }, SITE, 401],
+      ["ADMIN_DEV on the real address", { PLATFORM: r.platform, ASSETS: assets, ADMIN_DEV: "1" }, {}, SITE, 503],
+      ["signed-in POST", configured(r.platform), { method: "POST", headers: { "cf-access-jwt-assertion": good, origin: SITE } }, SITE, 405],
+      ["signed-in POST, password", passwordEnv, { method: "POST", headers: { cookie, origin: SITE } }, SITE, 405],
+    ];
+    for (const [label, e, init, host, status, at] of cases) {
+      for (const path of PATHS) {
+        const res = await handle(req(path, init, host), e, at ?? NOW);
+        expect(res.status, `${label} ${path}`).toBe(status);
+      }
+    }
+    expect(r.calls()).toBe(0);
+    // and the same signed-in cookie does reach it, so the refusals above aren't an accident of the setup
+    expect((await handle(req("/api/summary", { headers: { cookie } }, SITE), passwordEnv, NOW)).status).toBe(200);
+    expect(r.calls()).toBe(1);
+  });
+});
+
+describe("the admin Worker has no database", () => {
+  it("has no DB in its environment's type", () => {
+    expectTypeOf<AdminEnv>().not.toHaveProperty("DB");
+    expectTypeOf<AdminEnv>().toHaveProperty("PLATFORM");
+    // @ts-expect-error a database binding isn't part of the admin Worker's environment
+    const withDb: AdminEnv = { PLATFORM: realPlatform(), ASSETS: assets, DB: env.DB };
+    expect(withDb.PLATFORM).toBeDefined();
+  });
+  it("answers every route without ever reading a DB binding", async () => {
+    freezeClock();
+    let reads = 0;
+    const e = {
+      PLATFORM: realPlatform(), ASSETS: assets, ADMIN_DEV: "1",
+      get DB(): never { reads++; throw new Error("the admin Worker read DB"); },
+    } as unknown as AdminEnv;
+    for (const [path] of ROUTES) expect((await handle(req(path, {}, "http://localhost:8790"), e, NOW)).status, path).toBe(200);
+    expect(reads).toBe(0);
   });
 });

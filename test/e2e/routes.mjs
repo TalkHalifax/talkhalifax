@@ -259,6 +259,8 @@ try {
   ok(!adminConfig.includes("ADMIN_DEV"), "admin config: doesn't set the local bypass");
   ok(/"name":\s*"LOGIN_LIMIT"/.test(adminConfig), "admin config: limits sign-in attempts");
   ok(!/ADMIN_(USER|PASSWORD)"?\s*:/.test(adminConfig), "admin config: the username and password are secrets, not in the file");
+  ok(/"services":\s*\[\s*\{\s*"binding":\s*"PLATFORM",\s*"service":\s*"talkhalifax",\s*"entrypoint":\s*"AdminApi"\s*\}\s*\]/.test(adminConfig), "admin config: binds PLATFORM to talkhalifax / AdminApi");
+  ok(!adminConfig.includes("d1_databases"), "admin config: has no d1_databases");
 
   // The admin site, on the same throwaway data
   adminServer = spawn("npx", ["wrangler", "--config", "test/wrangler.admin.jsonc", "dev", "--port", String(ADMIN_PORT), "--persist-to", DATA, "--inspector-port", "9331"], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
