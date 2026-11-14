@@ -33,7 +33,7 @@ Continuity, Admin).
 
 ## Admin site
 
-`admin/` is a separate Worker on the same D1 database, behind a username and password (or Cloudflare Access, once set up). Migrations stay in `migrations/`, and it must keep refusing every request when neither is configured. See [README.md](README.md).
+`admin/` is a separate Worker with no D1 binding: it reads platform data only through `AdminApi` (`src/routes/admin-api.ts`) over the `PLATFORM` service binding, behind a username and password (or Cloudflare Access, once set up). It must keep refusing every request when neither is configured. `AdminApi`'s argument checks and error messages are a contract with admin: change them only with the matching admin change in the same release. Never roll the main Worker back past `f05802c` while admin is bound. See [README.md](README.md).
 
 ## Line endings
 
