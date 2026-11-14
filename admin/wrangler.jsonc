@@ -1,4 +1,5 @@
-// The admin site: a separate Worker on the same database, behind the editor's username and password (the ADMIN_USER and
+// The admin site: a separate Worker with no database of its own. It reads platform data only through PLATFORM, a service
+// binding to the main Worker's AdminApi entrypoint. It sits behind the editor's username and password (the ADMIN_USER and
 // ADMIN_PASSWORD secrets), or Cloudflare Access once that's set up. Its address (admin.talkhalifax.ca) is a custom
 // domain set in the dashboard, like the main site's.
 {
@@ -18,8 +19,6 @@
   // The Worker runs first so the page itself is behind the sign-in check too.
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
 
-  "d1_databases": [
-    { "binding": "DB", "database_name": "talkhalifax", "database_id": "11e74fb3-39eb-42ac-9f0b-620d5c3d47d2" }
-  ],
+  "services": [{ "binding": "PLATFORM", "service": "talkhalifax", "entrypoint": "AdminApi" }],
   "observability": { "enabled": true }
 }
