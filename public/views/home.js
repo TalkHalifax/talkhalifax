@@ -13,14 +13,14 @@ function renderBanners() {
   for (const a of (S.alerts && S.alerts.items) || []) {
     if (a.cat !== "Weather" || a.kind !== "Warning") continue;
     const until = t(a.until) ? `Until ${shortDate(a.until)}, ${hm(a.until)}` : "";
-    items.push({ rank: 0, sev: "", label: "Weather · Warning",
+    items.push({ rank: 0, label: "Weather · Warning",
       title: a.title, meta: until, at: t(a.publishedAt), link: `href="${esc(a.url)}" target="_blank" rel="noopener"` });
   }
   for (const n of S.stories || []) {
     if (n.kind !== "notice" || Date.now() - t(n.publishedAt) >= 7 * 864e5) continue;
     const type = noticeType(n);
     if (noticeSeverity(n, type) !== "urgent") continue;
-    items.push({ rank: 1, sev: "", label: type + (n.statusLabel ? " · " + n.statusLabel : ""),
+    items.push({ rank: 1, label: type + (n.statusLabel ? " · " + n.statusLabel : ""),
       title: n.headline, meta: shortDate(n.publishedAt), at: t(n.publishedAt), link: `href="#article-${esc(n.id)}" data-article="${esc(n.id)}"` });
   }
   items.sort((a, b) => a.rank - b.rank || b.at - a.at);
@@ -29,7 +29,8 @@ function renderBanners() {
   const shown = S.allBanners ? items : items.slice(0, 1);
   // The first banner carries the toggle for the rest, so a stack costs no extra row when collapsed
   const toggle = items.length > 1 ? `<button type="button" class="abar-tog" id="abarMore" aria-expanded="${!!S.allBanners}">${S.allBanners ? "Less" : `+${items.length - 1} more`}</button>` : "";
-  el.innerHTML = shown.map((b, i) => `<div class="abar${b.sev}"><div class="wrap abar-row"><a class="abar-in" ${b.link}>
+  // Both banner kinds use the default warn band
+  el.innerHTML = shown.map((b, i) => `<div class="abar"><div class="wrap abar-row"><a class="abar-in" ${b.link}>
       <span class="abar-k">${esc(b.label)}</span><span class="abar-t">${esc(b.title)}</span>${b.meta ? `<span class="abar-m">${esc(b.meta)}</span>` : ""}
     </a>${i === 0 ? toggle : ""}</div></div>`).join("");
   const more = $("#abarMore");
