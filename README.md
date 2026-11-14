@@ -14,7 +14,7 @@ Halifax news, rewritten as short articles with a live chat in each one. Runs on 
 - `src/room.ts`: `ArticleRoom`, one Durable Object per story, holding its chat history, presence and typing
 - `src/auth.ts`: sessions (HttpOnly cookie), Google sign-in, and a localhost-only dev sign-in
 - `src/stats.ts` and `public/stats.js`: anonymous counts of who has the site open and which stories are shown and opened, for the admin site's charts
-- `admin/`: the admin site, a separate read-only Worker on the same database, behind a username and password (see below)
+- `admin/`: the admin site, a separate read-only Worker that reads through `AdminApi` on the main Worker, behind a username and password (see below)
 - `migrations/`: the D1 schema. `scripts/articles/` plus `scripts/build-seed.mjs` load the current stories.
 
 ## Run locally
@@ -59,7 +59,7 @@ Secrets live on the Worker, not in the repo:
 
 ## The admin site
 
-`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`admin/`) that shares the site's D1 database. Stage 1 is read-only. Every push to `main` deploys it after the main site. It has no `workers.dev` address, and it refuses every request until its username and password are set.
+`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`admin/`) with no database of its own: it reads everything through `AdminApi` on the main Worker, over the `PLATFORM` service binding. Stage 1 is read-only. Every push to `main` deploys it after the main site. It has no `workers.dev` address, and it refuses every request until its username and password are set.
 
 To set it up, once:
 1. Store a username and password on the admin Worker. Pick a password of at least 16 characters, or the site won't use it. The address is public, so make it hard to guess: a passphrase of four or more unrelated words works, or one a password manager makes. Don't reuse one from another site, and keep it unrelated to TalkHalifax or Halifax. Both are secrets because this repo is public.
@@ -73,11 +73,13 @@ Signing in keeps you in for 12 hours, and **Sign out** ends it on that browser. 
 
 **Later, Cloudflare Access** can replace the password: set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on the admin Worker, after creating a self-hosted Access application for `admin.talkhalifax.ca` that allows only your login. Once either is set, the Worker uses Access and ignores the password.
 
-To run it locally against your local data:
+To run it locally against your local data, start the main site first (`npx wrangler dev`), then admin in a second terminal. Admin finds the main Worker through wrangler's local dev registry, which is per user, so run only one copy of each at a time:
 ```bash
 npx wrangler dev --config admin/wrangler.jsonc --port 8790 --persist-to .wrangler/state --var ADMIN_DEV:1
 ```
 `ADMIN_DEV` only skips the sign-in check on localhost. Never set it on the real Worker.
+
+The main Worker must never be rolled back past the version that added `AdminApi` (commit `f05802c`) while admin is bound to it. Rolling admin back past the switch to `AdminApi` brings its old D1 binding back; only the editor does that.
 
 ## Moderators
 
