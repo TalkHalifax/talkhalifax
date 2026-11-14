@@ -24,7 +24,7 @@ read the branch with:
 
 The orchestrator fetches the branch before the review. If `origin/<branch>` isn't there, stop and say so.
 
-The branch must be an `events/`, `platform/`, `site/`, `trust/` or `agent-ops/` branch. The owning team and CI run
+The branch must be an `events/`, `platform/`, `site/`, `trust/`, `agent-ops/` or `admin/` branch. The owning team and CI run
 its tests; you don't. Check it against the infrastructure checklist and the concerns you were given.
 
 ### Infrastructure checklist
