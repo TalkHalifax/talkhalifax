@@ -21,6 +21,9 @@ You receive the scope and acceptance criteria from Roman Greene.
    - End-to-end checks are drafted in `protected-drafts/test/e2e/`, at the path they will have in `test/e2e/`. You
      can't run a draft, because nothing loads that folder. Say what each new check does, and the orchestrator runs and
      promotes it.
+   - The main deploy workflow is drafted at `protected-drafts/.github/workflows/deploy.yml` (CR-17), a full copy of
+     `.github/workflows/deploy.yml` with the change made. Every workflow draft gets an Infrastructure & Continuity review
+     before the orchestrator promotes it. Say what changed and why, step by step.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
    - `node --check` on every client `.js` file the change touches, if any.

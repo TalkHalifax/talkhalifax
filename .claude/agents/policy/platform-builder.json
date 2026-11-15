@@ -14,7 +14,8 @@
       "test/unit/headers.test.ts",
       "test/unit/github-jobs.test.ts",
       "test/unit/admin-api.test.ts",
-      "protected-drafts/test/e2e/**"
+      "protected-drafts/test/e2e/**",
+      "protected-drafts/.github/workflows/deploy.yml"
     ],
     "deny": []
   },
@@ -43,6 +44,7 @@
     ["git", "add", "test/unit/github-jobs.test.ts"],
     ["git", "add", "test/unit/admin-api.test.ts"],
     ["git", "add", "re:^protected-drafts/test/e2e/[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"],
+    ["git", "add", "protected-drafts/.github/workflows/deploy.yml"],
     ["git", "commit", "-m", "*"]
   ],
   "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
