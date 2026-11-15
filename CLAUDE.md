@@ -33,7 +33,7 @@ Continuity, Admin).
 
 ## Admin site
 
-`admin/` is a separate Worker with no D1 binding: it reads platform data only through `AdminApi` (`src/routes/admin-api.ts`) over the `PLATFORM` service binding, behind a username and password (or Cloudflare Access, once set up). It must keep refusing every request when neither is configured. `AdminApi`'s argument checks and error messages are a contract with admin: change them only with the matching admin change in the same release. Never roll the main Worker back past `f05802c` while admin is bound. See [README.md](README.md).
+The admin site lives in its own repo, [TalkHalifax/talkhalifax-admin](https://github.com/TalkHalifax/talkhalifax-admin), and deploys from there. This repo only provides `AdminApi` (`src/routes/admin-api.ts`), which the admin Worker reads over the `PLATFORM` service binding. The admin repo's CI type-checks against that file and runs against this repo's `main`, so `AdminApi` changes only add: change it here first, then the admin repo, and remove an old shape only once admin stops using it. Never roll the main Worker back past `f05802c`, and never bring the admin deploy steps back into `deploy.yml` (both repos would then deploy it). See [README.md](README.md).
 
 ## Line endings
 

@@ -14,7 +14,7 @@ Halifax news, rewritten as short articles with a live chat in each one. Runs on 
 - `src/room.ts`: `ArticleRoom`, one Durable Object per story, holding its chat history, presence and typing
 - `src/auth.ts`: sessions (HttpOnly cookie), Google sign-in, and a localhost-only dev sign-in
 - `src/stats.ts` and `public/stats.js`: anonymous counts of who has the site open and which stories are shown and opened, for the admin site's charts
-- `admin/`: the admin site, a separate read-only Worker that reads through `AdminApi` on the main Worker, behind a username and password (see below)
+- `src/routes/admin-api.ts`: `AdminApi`, the private entrypoint the admin site reads through. The admin site itself lives in its own repo, [TalkHalifax/talkhalifax-admin](https://github.com/TalkHalifax/talkhalifax-admin) (see below)
 - `migrations/`: the D1 schema. `scripts/articles/` plus `scripts/build-seed.mjs` load the current stories.
 
 ## Run locally
@@ -59,27 +59,21 @@ Secrets live on the Worker, not in the repo:
 
 ## The admin site
 
-`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`admin/`) with no database of its own: it reads everything through `AdminApi` on the main Worker, over the `PLATFORM` service binding. Stage 1 is read-only. Every push to `main` deploys it after the main site. It has no `workers.dev` address, and it refuses every request until its username and password are set.
+`admin.talkhalifax.ca`: Home, Users, Content and Administration, on a separate Worker (`talkhalifax-admin`) with no database of its own. It lives in its own repo, [TalkHalifax/talkhalifax-admin](https://github.com/TalkHalifax/talkhalifax-admin), which deploys it on every push to its `main`; its local run, tests and deploy are described there. It reads everything through `AdminApi` on this repo's Worker, over the `PLATFORM` service binding. Stage 1 is read-only. It has no `workers.dev` address, and it refuses every request until its username and password (or Cloudflare Access) are set.
 
-To set it up, once:
-1. Store a username and password on the admin Worker. Pick a password of at least 16 characters, or the site won't use it. The address is public, so make it hard to guess: a passphrase of four or more unrelated words works, or one a password manager makes. Don't reuse one from another site, and keep it unrelated to TalkHalifax or Halifax. Both are secrets because this repo is public.
-   ```bash
-   npx wrangler secret put ADMIN_USER --config admin/wrangler.jsonc
-   npx wrangler secret put ADMIN_PASSWORD --config admin/wrangler.jsonc
-   ```
-2. **Workers & Pages › talkhalifax-admin › Settings › Domains & Routes:** add the custom domain `admin.talkhalifax.ca`.
-
-Signing in keeps you in for 12 hours, and **Sign out** ends it on that browser. Changing the password signs everyone out. Sign-in attempts are limited to 5 a minute from one IP address; if that limit isn't set up, password sign-in is refused.
-
-**Later, Cloudflare Access** can replace the password: set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on the admin Worker, after creating a self-hosted Access application for `admin.talkhalifax.ca` that allows only your login. Once either is set, the Worker uses Access and ignores the password.
-
-To run it locally against your local data, start the main site first (`npx wrangler dev`), then admin in a second terminal. Admin finds the main Worker through wrangler's local dev registry, which is per user, so run only one copy of each at a time:
+Its secrets stay on the Worker. To set or change the username and password (at least 16 characters, or the site won't use it; the address is public, so use a passphrase of four or more unrelated words, or one a password manager makes, unrelated to TalkHalifax or Halifax and not reused from another site):
 ```bash
-npx wrangler dev --config admin/wrangler.jsonc --port 8790 --persist-to .wrangler/state --var ADMIN_DEV:1
+npx wrangler secret put ADMIN_USER --name talkhalifax-admin
+npx wrangler secret put ADMIN_PASSWORD --name talkhalifax-admin
 ```
-`ADMIN_DEV` only skips the sign-in check on localhost. Never set it on the real Worker.
+The custom domain `admin.talkhalifax.ca` is set in **Workers & Pages › talkhalifax-admin › Settings › Domains & Routes**. Signing in keeps you in for 12 hours, and **Sign out** ends it on that browser. Changing the password signs everyone out. Sign-in attempts are limited to 5 a minute from one IP address; if that limit isn't set up, password sign-in is refused.
 
-The main Worker must never be rolled back past the version that added `AdminApi` (commit `f05802c`) while admin is bound to it. Rolling admin back past the switch to `AdminApi` brings its old D1 binding back; only the editor does that.
+**Later, Cloudflare Access** can replace the password: set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on `talkhalifax-admin`, after creating a self-hosted Access application for `admin.talkhalifax.ca` that allows only your login. Once either is set, the Worker uses Access and ignores the password.
+
+**What this repo owes the admin site:**
+- `AdminApi` changes only add: change `main` here first, then the admin repo, and remove an old shape only once admin no longer uses it. The admin repo's CI type-checks against `src/routes/admin-api.ts` here and runs its browser check against this repo's `main`, so tell the Admin team (through the orchestrator) before changing `AdminApi`, `test/wrangler.test.jsonc`, `/api/stories`, the seed's columns or the `wrangler` version.
+- Never roll the main Worker back past the version that added `AdminApi` (commit `f05802c`): admin depends on it.
+- Never bring the admin deploy steps back into this repo's `deploy.yml` (removed in #47). Both repos would then deploy `talkhalifax-admin`, and this one would overwrite it with an old copy.
 
 ## Moderators
 
