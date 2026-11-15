@@ -3,13 +3,12 @@
 //   npm run test:e2e
 // Uses Chrome or Edge from the system, or the one at CHROME_PATH.
 import { execSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 
 const PORT = 8791, B = `http://localhost:${PORT}`;
-const ADMIN_PORT = 8792, ADMIN = `http://localhost:${ADMIN_PORT}`;
 const DATA = ".wrangler/e2e";
 const WRANGLER = ["wrangler", "--config", "test/wrangler.test.jsonc"];
 const win = process.platform === "win32";
@@ -87,7 +86,6 @@ writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_W
 npx([...WRANGLER, "d1", "execute", "talkhalifax-test", "--local", "--persist-to", DATA, "--file", `${DATA}/seed.sql`]);
 
 const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
-let adminServer;
 const stopServer = (s = server) => {
   if (!s) return;
   try { if (win) execSync(`taskkill /pid ${s.pid} /T /F`, { stdio: "ignore" }); else process.kill(-s.pid); } catch { /* already gone */ }
@@ -251,86 +249,6 @@ try {
     await p.close();
   }
 
-  // The admin site's real config keeps it off every other address, and can't skip the sign-in check
-  const adminConfig = readFileSync("admin/wrangler.jsonc", "utf8");
-  ok(/"workers_dev":\s*false/.test(adminConfig), "admin config: no workers.dev address");
-  ok(/"preview_urls":\s*false/.test(adminConfig), "admin config: no preview addresses");
-  ok(/"run_worker_first":\s*true/.test(adminConfig), "admin config: pages go through the sign-in check");
-  ok(!adminConfig.includes("ADMIN_DEV"), "admin config: doesn't set the local bypass");
-  ok(/"name":\s*"LOGIN_LIMIT"/.test(adminConfig), "admin config: limits sign-in attempts");
-  ok(!/ADMIN_(USER|PASSWORD)"?\s*:/.test(adminConfig), "admin config: the username and password are secrets, not in the file");
-  ok(/"services":\s*\[\s*\{\s*"binding":\s*"PLATFORM",\s*"service":\s*"talkhalifax",\s*"entrypoint":\s*"AdminApi"\s*\}\s*\]/.test(adminConfig), "admin config: binds PLATFORM to talkhalifax / AdminApi");
-  ok(!adminConfig.includes("d1_databases"), "admin config: has no d1_databases");
-
-  // The admin site, on the same throwaway data
-  adminServer = spawn("npx", ["wrangler", "--config", "test/wrangler.admin.jsonc", "dev", "--port", String(ADMIN_PORT), "--persist-to", DATA, "--inspector-port", "9331"], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
-  for (let i = 0; ; i++) {
-    if (await fetch(ADMIN + "/api/summary").then(r => r.ok, () => false)) break;
-    if (i > 60) throw new Error("The local admin Worker didn't start.");
-    await wait(1000);
-  }
-  const adminErrors = [];
-  for (const [width, height, label] of [[1280, 900, "desktop"], [375, 812, "phone"]]) {
-    const open = async hash => {
-      const p = await browser.newPage();
-      p.on("pageerror", e => adminErrors.push(`${label} #${hash}: ${e.message}`));
-      p.on("console", m => { if (m.type() === "error" && !/fonts\.g|ERR_NAME|ERR_INTERNET/.test(m.text() + (m.location().url || ""))) adminErrors.push(`${label} #${hash}: ${m.text()}`); });
-      await p.setViewport({ width, height });
-      await p.goto(`${ADMIN}/#${hash}`, { waitUntil: "load" });
-      return p;
-    };
-    const fits = p => p.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
-    const h1 = p => p.evaluate(() => document.querySelector("h1")?.innerText || "");
-
-    let p = await open("home");
-    await p.waitForSelector("#charts .plot", { timeout: 8000 }).catch(() => {});
-    ok(await h1(p) === "Home", `admin ${label}: Home opens`);
-    ok(await p.$$eval("#charts > .card", c => c.length) === 4, `admin ${label}: Home has the four chart cards`);
-    ok(await p.$$eval("#charts .plot", c => c.length) === 5, `admin ${label}: with a plot for each measure`);
-    ok(await fits(p), `admin ${label}: Home fits the screen`);
-    await p.click('[data-range="30d"]');
-    await p.waitForFunction(() => document.querySelector('[data-range="30d"]').classList.contains("on"), { timeout: 5000 }).catch(() => {});
-    ok(await p.$$eval("#charts .plot:first-child .col, #charts .plot .col", c => c.length) >= 30, `admin ${label}: the range switch redraws the charts`);
-    await p.click("[data-table=signups]");
-    ok(await p.$$eval("#charts .chart-table", c => c.length) === 1, `admin ${label}: a chart can show as a table`);
-    await p.close();
-
-    // Switching pages quickly shows the last one asked for, whichever answer arrives first
-    p = await open("home");
-    await p.evaluate(() => { location.hash = "#jobs"; location.hash = "#users"; location.hash = "#content-data"; location.hash = "#jobs"; });
-    await p.waitForFunction(() => document.querySelector("h1")?.innerText === "Administration", { timeout: 5000 }).catch(() => {});
-    await wait(1000);
-    ok(await h1(p) === "Administration", `admin ${label}: switching quickly lands on the last page`, await h1(p));
-    await p.close();
-
-    p = await open("users");
-    await p.waitForSelector("#urows", { timeout: 5000 }).catch(() => {});
-    ok(await h1(p) === "Users", `admin ${label}: Users opens`);
-    ok(await fits(p), `admin ${label}: Users fits the screen`);
-    await p.close();
-
-    p = await open("content");
-    await p.waitForFunction(() => document.querySelector("#crows")?.innerText.includes("A story still developing"), { timeout: 5000 }).catch(() => {});
-    ok((await p.evaluate(() => document.querySelector("#crows")?.innerText || "")).includes("A story still developing"), `admin ${label}: Content lists the stories`);
-    ok(await fits(p), `admin ${label}: Content fits the screen`);
-    await p.click('[data-screen="Notices"]');
-    await p.waitForFunction(() => !document.querySelector("#crows")?.innerText.includes("A story still developing"), { timeout: 5000 }).catch(() => {});
-    ok((await p.evaluate(() => document.querySelector("#crows")?.innerText || "")).includes("A notice about a road"), `admin ${label}: Content filters by screen`);
-    await p.close();
-
-    p = await open("content-data");
-    await p.waitForFunction(() => document.querySelector("h1")?.innerText === "Content", { timeout: 5000 }).catch(() => {});
-    ok(await fits(p), `admin ${label}: Data fits the screen`);
-    await p.close();
-
-    p = await open("jobs");
-    await p.waitForFunction(() => document.querySelector("h1")?.innerText === "Administration", { timeout: 5000 }).catch(() => {});
-    ok(await h1(p) === "Administration", `admin ${label}: Administration opens`);
-    ok(await fits(p), `admin ${label}: Administration fits the screen`);
-    await p.close();
-  }
-  ok(!adminErrors.length, "admin: no script errors", adminErrors.slice(0, 5).join("; "));
-
   // The API by plain requests, on its own throwaway rows: what each route answers today, signed out, as a member and as a
   // moderator. Read-only checks first, then the ones that change things, account deletion last. Labels never carry a session or a reset link.
   {
@@ -342,6 +260,11 @@ try {
 
     r = await api("GET", "/api/nope");
     ok(r.status === 404 && r.body?.error === "Not found", "api: an unknown /api/ path is 404", http(r));
+    // AdminApi has no public address: every guess at one is 404 on the main Worker, read or write
+    for (const path of ["/internal/x", "/internal/summary", "/admin-api", "/admin-api/summary", "/api/admin", "/api/admin/summary", "/api/adminx", "/api/admin-api/jobs"]) for (const method of ["GET", "POST"]) {
+      r = await api(method, path, method === "POST" ? { json: {} } : {});
+      ok(r.status === 404, `api: ${method} ${path} is 404 (no public path reaches AdminApi)`, http(r));
+    }
 
     // Who's signed in
     r = await api("GET", "/api/me");
@@ -637,7 +560,6 @@ try {
 } finally {
   await browser?.close().catch(() => {});
   stopServer();
-  stopServer(adminServer);
 }
 console.log(fails ? `\n${fails} failed` : "\nAll passed");
 process.exit(fails ? 1 : 0);

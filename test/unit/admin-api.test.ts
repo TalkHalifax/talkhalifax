@@ -7,7 +7,7 @@ import {
   AdminApi, contentArgs, contentData, dataSourcesData, jobsData, overviewData, summaryData, usersArgs, usersData,
 } from "../../src/routes/admin-api";
 import { CRON_JOBS } from "../../src/routes/cron-jobs";
-import { ADMIN_SECRETS, env, HOUR, seedAdminData } from "./helpers";
+import { ADMIN_SECRETS, DAY, env, HOUR, iso, makeStory, makeUser, seedAdminData } from "./helpers";
 
 // 8 a.m. in Halifax, mid-hour, so nothing here sits on an hour's edge
 const NOW = Date.UTC(2026, 10, 7, 12, 30);
@@ -396,5 +396,166 @@ describe("AdminApi and the cron share one job list", () => {
     }
     await env.DB.prepare("UPDATE feeds SET updated_at = ? WHERE name = 'cron-health'").bind(new Date(NOW - 2 * HOUR).toISOString()).run();
     expect((await api().jobs()).jobs.find(x => x.name === CRON_JOBS[0].name)!.state).toBe("late");
+  });
+});
+
+// ---------- what test/unit/admin.test.ts checked through the admin site, checked here on AdminApi itself ----------
+
+/** The methods use Date.now(), so these tests pin it to NOW. */
+const freezeClock = () => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(NOW); };
+const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+
+describe("What the admin site showed, through AdminApi", () => {
+  beforeEach(freezeClock);
+
+  it("searches names and usernames, treating wildcards as plain text", async () => {
+    await makeUser("u_a", { provider_sub: "harbour", name: "Ann" });
+    await makeUser("u_b", { provider_sub: "bedford", name: "Bo" });
+    expect((await api().users({ q: "harb" })).users.map(u => u.id)).toEqual(["u_a"]);
+    expect((await api().users({ q: "%" })).users).toEqual([]);
+  });
+  it("lists stories and upcoming events, not discarded ones, and links only what's public", async () => {
+    await makeStory("c-dev", { headline: "Developing one" });
+    await makeStory("c-arch", { headline: "Archived one" }, { stage: "archived" });
+    await makeStory("c-draft", { headline: "Draft one" }, { stage: "draft" });
+    await makeStory("c-gone", { headline: "Discarded one" }, { stage: "discarded" });
+    const soon = new Date(NOW + DAY).toISOString(), past = new Date(NOW - DAY).toISOString();
+    await env.DB.prepare("INSERT INTO feeds (name, body, updated_at) VALUES ('events', ?, ?)").bind(JSON.stringify({ events: [
+      { id: "e1", title: "Story time", url: "https://example.test/e1", start: soon, end: soon },
+      { id: "e2", title: "Finished event", url: "https://example.test/e2", start: past, end: past },
+    ] }), iso()).run();
+    const { items } = await api().content();
+    const titles = items.map(i => i.title);
+    expect(titles).toEqual(expect.arrayContaining(["Developing one", "Archived one", "Draft one", "Story time"]));
+    expect(titles).not.toContain("Discarded one");
+    expect(titles).not.toContain("Finished event");
+    expect(items.find(i => i.title === "Draft one")!.url).toBeNull();
+    expect(items.find(i => i.title === "Draft one")!.status).toBe("waiting");
+    expect((await api().content({ screen: "Events" })).items.map(i => i.title)).toEqual(["Story time"]);
+    expect((await api().content({ status: "archived" })).items.map(i => i.title)).toEqual(["Archived one"]);
+  });
+  it("adds up each story's clicks and impressions from the last 30 days", async () => {
+    await makeStory("c-t", { headline: "Counted" });
+    const hour = Math.floor(NOW / HOUR);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO story_traffic (hour, story_id, impressions, clicks) VALUES (?, 'c-t', 5, 2)").bind(hour),
+      env.DB.prepare("INSERT INTO story_traffic (hour, story_id, impressions, clicks) VALUES (?, 'c-t', 3, 1)").bind(hour - 1),
+      env.DB.prepare("INSERT INTO story_traffic (hour, story_id, impressions, clicks) VALUES (?, 'c-t', 100, 100)").bind(hour - 31 * 24),
+    ]);
+    const item = (await api().content()).items.find(i => i.id === "c-t")!;
+    expect([item.impressions, item.clicks]).toEqual([8, 3]);
+  });
+});
+
+describe("The charts, through AdminApi", () => {
+  beforeEach(freezeClock);
+
+  it("gets through the day the clocks change", async () => {
+    vi.setSystemTime(Date.UTC(2026, 10, 2, 12)); // the day after clocks went back on Nov. 1, 2026
+    const o = await api().overview("7d");
+    expect(o.labels).toHaveLength(7);
+    expect(new Set(o.labels).size).toBe(7);
+  });
+  it("adds up sign-ups and messages, and takes the peak for people online", async () => {
+    await makeUser("u_new", { created_at: NOW - HOUR });
+    await makeUser("u_old", { created_at: NOW - 40 * DAY });
+    await makeUser("u_ai", { provider: "newsroom", created_at: NOW - HOUR });
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO message_index (id, story_id, user_id, text, created_at) VALUES ('m1', 's', 'u', 'a', ?)").bind(NOW - HOUR),
+      env.DB.prepare("INSERT INTO message_index (id, story_id, user_id, text, created_at, deleted) VALUES ('m2', 's', 'u', 'b', ?, 1)").bind(NOW - HOUR),
+      env.DB.prepare("INSERT INTO online_samples (at, online) VALUES (?, 4)").bind(NOW - HOUR),
+      env.DB.prepare("INSERT INTO online_samples (at, online) VALUES (?, 9)").bind(NOW - HOUR + 5 * 60_000),
+      env.DB.prepare("INSERT INTO online_samples (at, online) VALUES (?, 6)").bind(NOW - 60_000),
+    ]);
+    const o = await api().overview("24h");
+    expect(sum(o.series.signups)).toBe(1); // the newsroom account isn't a sign-up
+    expect(sum(o.series.messages)).toBe(1);
+    expect(Math.max(...o.series.online)).toBe(9);
+    expect(o.onlineNow).toBe(6);
+    expect(o.labels).toHaveLength(24);
+  });
+  it("leaves deleted accounts out of sign-ups, member counts and the list", async () => {
+    await makeUser("u_here", { created_at: NOW - HOUR });
+    await makeUser("u_gone", { provider: "deleted", created_at: NOW - HOUR });
+    expect(sum((await api().overview("24h")).series.signups)).toBe(1);
+    expect((await api().summary()).members).toBe(1);
+    const list = await api().users();
+    expect(list.users.map(u => u.id)).toEqual(["u_here"]);
+    expect(list.total).toBe(1);
+  });
+  it("says nobody is online when the newest sample is old", async () => {
+    await env.DB.prepare("INSERT INTO online_samples (at, online) VALUES (?, 12)").bind(NOW - HOUR).run();
+    expect((await api().overview()).onlineNow).toBe(0);
+  });
+});
+
+describe("AdminApi answers each address the admin site calls", () => {
+  beforeEach(async () => {
+    await seedAdminData(NOW);
+    freezeClock();
+  });
+
+  it("with the arguments each address gave it, the same as its query function", async () => {
+    // The 15 argument sets admin.test.ts read from the admin site's addresses
+    const cases: [typeof METHODS[number], unknown, () => Promise<unknown>][] = [
+      ["summary", undefined, () => summaryData(env, undefined, NOW)],
+      ["overview", "7d", () => overviewData(env, "7d", NOW)],
+      ["overview", "24h", () => overviewData(env, "24h", NOW)],
+      ["overview", "30d", () => overviewData(env, "30d", NOW)],
+      ["users", { q: "", role: "all", offset: 0 }, () => usersData(env, usersArgs({ q: "", role: "all", offset: 0 })!, NOW)],
+      ["users", { q: " HARB ", role: "all", offset: 0 }, () => usersData(env, usersArgs({ q: " HARB ", role: "all", offset: 0 })!, NOW)],
+      ["users", { q: "", role: "banned", offset: 0 }, () => usersData(env, usersArgs({ q: "", role: "banned", offset: 0 })!, NOW)],
+      ["users", { q: "%", role: "all", offset: 0 }, () => usersData(env, usersArgs({ q: "%", role: "all", offset: 0 })!, NOW)],
+      ["users", { q: "", role: "all", offset: 2 }, () => usersData(env, usersArgs({ q: "", role: "all", offset: 2 })!, NOW)],
+      ["content", { screen: "all", status: "all", q: "" }, () => contentData(env, contentArgs({ screen: "all", status: "all", q: "" })!, NOW)],
+      ["content", { screen: "Notices", status: "all", q: "" }, () => contentData(env, contentArgs({ screen: "Notices", status: "all", q: "" })!, NOW)],
+      ["content", { screen: "all", status: "archived", q: "Council" }, () => contentData(env, contentArgs({ screen: "all", status: "archived", q: "Council" })!, NOW)],
+      ["content", { screen: "Events", status: "all", q: "" }, () => contentData(env, contentArgs({ screen: "Events", status: "all", q: "" })!, NOW)],
+      ["dataSources", undefined, () => dataSourcesData(env, undefined, NOW)],
+      ["jobs", undefined, () => jobsData(env, undefined, NOW)],
+    ];
+    for (const [method, arg, direct] of cases) {
+      const label = `${method} ${JSON.stringify(arg)}`;
+      expect(plain(await call(api(), method, arg)), label).toEqual(plain(await direct()));
+    }
+    // and the seed shows up, so the comparison isn't empty against empty
+    expect((await api().users()).users.length).toBeGreaterThan(0);
+    expect((await api().content()).items.length).toBeGreaterThan(0);
+  });
+});
+
+describe("AdminApi accepts what the admin site sends", () => {
+  const ROLES = ["all", "member", "moderator", "journalist", "banned"];
+  const USERS_SENT: { q: string; role: string; offset: number }[] = [
+    { q: "", role: "all", offset: 0 },
+    { q: " Harb ", role: "moderator", offset: 200 },
+    ...ROLES.map(role => ({ q: "", role, offset: 0 })),
+    ...[0, 7, 1000, 2, 100000].map(offset => ({ q: "", role: "all", offset })),
+  ];
+  const SCREENS = ["all", "Developing", "Articles", "Notices", "Events"], STATUSES = ["all", "waiting", "active", "archived"];
+  const CONTENT_SENT = SCREENS.flatMap(screen => STATUSES.flatMap(status => [" Bridge ", ""].map(q => ({ screen, status, q }))));
+
+  it("usersArgs takes every users argument, trimming and lowercasing the search", () => {
+    expect(USERS_SENT).toHaveLength(12);
+    for (const o of USERS_SENT) {
+      const label = JSON.stringify(o);
+      const got = usersArgs(o);
+      expect(got, label).not.toBeNull();
+      expect(got, label).toStrictEqual({ q: o.q.trim().toLowerCase(), role: o.role, offset: o.offset });
+    }
+    expect(usersArgs({ q: " Harb ", role: "moderator", offset: 200 })).toStrictEqual({ q: "harb", role: "moderator", offset: 200 });
+  });
+  it("contentArgs takes every screen, status and search", () => {
+    expect(CONTENT_SENT).toHaveLength(40);
+    for (const o of CONTENT_SENT) {
+      const label = JSON.stringify(o);
+      const got = contentArgs(o);
+      expect(got, label).not.toBeNull();
+      expect(got, label).toStrictEqual({ screen: o.screen, status: o.status, q: o.q === "" ? "" : "bridge" });
+    }
+  });
+  it("users and content answer every one of them, with no Bad request", async () => {
+    for (const o of USERS_SENT) await expect(api().users(o), JSON.stringify(o)).resolves.toBeDefined();
+    for (const o of CONTENT_SENT) await expect(api().content(o), JSON.stringify(o)).resolves.toBeDefined();
   });
 });
