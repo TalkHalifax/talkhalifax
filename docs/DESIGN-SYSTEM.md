@@ -110,7 +110,7 @@ The footer's `v<N>` and the service worker's build name are stamped at deploy:
 
 - The stamp runs in the deploy job only, after checkout and before `wrangler deploy`, never in `check`, and it's never committed.
 - The value is `v<N>` (`^v[0-9]+$`). N comes from the merge commit subject "Merge pull request #N" (or a squash subject ending "(#N)").
-- It replaces `<span class="sf-ver" id="sfVer">dev</span>` in `public/index.html`, and `const BUILD = "dev";` in `public/sw.js`, with `v<N>`. Each string must occur exactly once, otherwise the step fails.
+- It replaces `dev` with `v<N>` inside `<span class="sf-ver" id="sfVer">dev</span>` in `public/index.html` and inside `const BUILD = "dev";` in `public/sw.js`, giving `<span class="sf-ver" id="sfVer">v54</span>` and `const BUILD = "v54";`. Each string must occur exactly once, otherwise the step fails.
 - Unstamped is `dev`. Saved stories live in the fixed `th-v7-data` cache, which never follows the version. The `th-vN` base is still bumped by hand when the cache layout changes.
 
 ## Voice in the interface
