@@ -37,7 +37,7 @@ You receive the other team's branch name and the concerns to check. Without chec
 `git log --oneline origin/main..origin/<branch>`. The orchestrator fetches the branch before the review. If
 `origin/<branch>` isn't there, stop and say so.
 
-The branch must be an `events/`, `platform/`, `site/`, `trust/` or `admin/` branch. The owning team and CI run its tests; you
+The branch must be an `events/`, `platform/`, `site/`, `trust/`, `admin/`, `home/` or `notices/` branch. The owning team and CI run its tests; you
 don't. Check it against the security checklist and the concerns you were given.
 
 ### Security checklist
