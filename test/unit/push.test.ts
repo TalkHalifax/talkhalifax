@@ -698,6 +698,14 @@ describe("sweeping abandoned subscriptions (NOT-1 D2)", () => {
     expect([...secrets].filter(s => text.includes(s))).toHaveLength(0);
     expect(await left()).toEqual(["1", "2", "3", "4", "5"]);
   });
+
+  // NOT-1 N1: a reader who changed their choices recently is kept, however long since anything was sent
+  it("counts from whichever came later, the last send or the last change", async () => {
+    await put(7, { last_sent_at: days(200), updated_at: days(10) }); // kept: changed 10 days ago
+    await put(8, { last_sent_at: days(200), updated_at: days(181) }); // gone: neither in 181 days
+    expect(await sweepSubscriptions(envOn)).toEqual({ removed: 1 });
+    expect(await left()).toEqual(["7"]);
+  });
 });
 
 describe("the source itself (NOT-1 D2)", () => {
