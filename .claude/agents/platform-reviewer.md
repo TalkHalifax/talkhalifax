@@ -22,6 +22,11 @@ You review in the worktree where the branch is already checked out.
      indentation.
 2. Run the tests: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
+   - `npm run test:hooks`: the agent guard's own tests, which CI runs.
+   - For a change people can see, `node test/e2e/look.mjs <route> ...` with plain-word routes (`root`, `home`,
+     `notices`, `events`, `article-<id>`), adding `--dark` or `--mid` when they matter. It runs the site locally on
+     test data and saves phone and desktop screenshots, with and without reduced motion, to `.agent-tmp/look/`.
+     Read each one and report what it shows. Run the command exactly as written, with nothing set in front of it.
    - `node --check` on every client `.js` file the change touches, if any.
 3. Check the diff stays inside the Platform Core scope (`src/index.ts`, `src/env.ts`, `src/github-jobs.ts`,
    `src/text-modules.d.ts`, `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`,
