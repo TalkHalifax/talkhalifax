@@ -2,24 +2,34 @@
 // It starts its own local Worker on throwaway seeded data (.wrangler/look, wiped each run) and opens each route in
 // Chrome at 375x812 (phone) and 1280x800, each with and without reduced motion: four PNGs per route.
 // --dark adds each shot again in dark mode; --mid adds an 800x1000 width with the same variants.
-//   node test/e2e/look.mjs [--dark] [--mid] <route> [<route>...]   e.g. node test/e2e/look.mjs --dark / /#notices
-// It never reaches the network beyond localhost: every other request is blocked and listed, and so is /api/transit/.
+//   node test/e2e/look.mjs [--dark] [--mid] <route> [<route>...]   e.g. node test/e2e/look.mjs --dark root notices article-look-developing
+// A route is a bare word (root is /, any other word w is /#w), '#...' (quote it in bash) or /... (not from Git Bash,
+// which rewrites it into a Windows path). No hosts, URLs, dots or colons. Each page is shot once.
+// It never reaches production. The browser may reach only localhost; every other request is blocked and listed, as is
+// /api/transit/. The local Worker's own outbound calls are not blocked.
 // Files go to .agent-tmp/look/<slug>-<375|800|1280>[-dark][-reduced].png under the current folder, overwritten each run.
+// Takes about 15 s per route with no flags, more with --dark or --mid. Ctrl+C or a kill stops the Worker and Chrome.
 // Uses Chrome or Edge from the system, or the one at CHROME_PATH. Not a test: it checks nothing and counts nothing.
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 
-const ROUTE = /^\/[#a-z0-9\/_?=&-]*$/;
+// Every route is normalised to its /... form; the page URL is always B + that
+const toRoute = a => /^\/[#a-z0-9\/_?=&-]*$/.test(a) ? a
+  : /^#[a-z0-9\/_?=&-]*$/.test(a) ? "/" + a
+  : /^[a-z0-9-]+$/.test(a) ? (a === "root" ? "/" : "/#" + a)
+  : null;
 const args = process.argv.slice(2);
 const dark = args.includes("--dark"), mid = args.includes("--mid");
-const routes = args.filter(a => a !== "--dark" && a !== "--mid");
-if (!routes.length || !routes.every(r => ROUTE.test(r))) {
-  console.error("usage: node test/e2e/look.mjs [--dark] [--mid] <route> [<route>...]   e.g. / /#home /#notices /#article-e2e-developing");
+const given = args.filter(a => a !== "--dark" && a !== "--mid").map(toRoute);
+if (!given.length || given.includes(null)) {
+  console.error("usage: node test/e2e/look.mjs [--dark] [--mid] <route> [<route>...]   routes: root, home, notices, article-<id> (= /#<word>), or /#... and '#...'");
   process.exit(2);
 }
+const routes = [...new Set(given.map(r => r === "/#" ? "/" : r))]; // "/#" is the same page as "/"
 const WIDTHS = [[375, 812], ...(mid ? [[800, 1000]] : []), [1280, 800]];
 const SCHEMES = dark ? [false, true] : [false];
 
@@ -120,6 +130,13 @@ function browserPath() {
 const npx = args => execSync(`npx ${args.join(" ")}`, { stdio: "pipe", env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
 const slug = r => r.replace(/^\//, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "root";
 
+// Another run (or anything else) on the port: stop before touching its data or starting a second Worker
+const inUse = host => new Promise(r => { const s = connect(PORT, host); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
+if (await inUse("127.0.0.1") || await inUse("::1")) {
+  console.error(`port ${PORT} is in use; is another look run still going?`);
+  process.exit(1);
+}
+
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
 writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_API} ${SEED_LOOK}`);
@@ -131,13 +148,21 @@ const stopServer = (s = server) => {
   try { if (win) execSync(`taskkill /pid ${s.pid} /T /F`, { stdio: "ignore" }); else process.kill(-s.pid); } catch { /* already gone */ }
 };
 
-let browser, profile, bad = false;
-const cleanUp = async () => {
-  await browser?.close().catch(() => {});
+let browser, profile, bad = false, stopping = false, quitCode = null;
+const dropProfile = () => { if (profile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ } };
+// Signals, or the Worker dying: stop the Worker first and synchronously, then Chrome if it lets us, then exit
+const quit = code => {
+  if (stopping) return;
+  stopping = true;
+  quitCode = code;
   stopServer();
-  if (profile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ }
+  Promise.race([browser?.close(), wait(5000)]).catch(() => {}).finally(() => { dropProfile(); process.exit(code); });
 };
-process.on("SIGINT", () => cleanUp().finally(() => process.exit(130)));
+for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(signal, () => quit(code));
+server.on("exit", () => { if (!stopping) { console.error("The local Worker stopped unexpectedly."); quit(1); } });
+
+// Back to the top, then two frames and a short pause so layout and the sticky header settle
+const toTop = p => p.evaluate(() => { window.scrollTo(0, 0); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); }).then(() => wait(200));
 
 try {
   for (let i = 0; ; i++) {
@@ -147,7 +172,8 @@ try {
   }
   const executablePath = browserPath();
   profile = mkdtempSync(join(tmpdir(), "th-look-"));
-  browser = await puppeteer.launch({ executablePath, headless: true, userDataDir: profile, args: process.env.CI ? ["--no-sandbox"] : [] });
+  browser = await puppeteer.launch({ executablePath, headless: true, userDataDir: profile, args: process.env.CI ? ["--no-sandbox"] : [],
+    handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false }); // our handler stops the Worker too
   mkdirSync(OUT, { recursive: true });
 
   for (const route of routes) {
@@ -155,6 +181,7 @@ try {
     for (const [width, height] of WIDTHS) for (const isDark of SCHEMES) for (const reduced of [false, true]) {
       const tag = `${width}${isDark ? "-dark" : ""}${reduced ? "-reduced" : ""}`;
       const file = join(OUT, `${slug(route)}-${tag}.png`);
+      const phone = width < 500;
       const p = await browser.newPage();
       const aborted = new WeakSet();
       p.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
@@ -165,15 +192,15 @@ try {
       await p.setBypassServiceWorker(true);
       p.on("request", r => {
         const url = r.url();
-        if (url.startsWith("data:") || url.startsWith("blob:")) return r.continue();
+        if (url.startsWith("data:") || url.startsWith("blob:")) return r.continue().catch(() => {});
         let origin = "";
         try { origin = new URL(url).origin; } catch { /* not a URL: blocked */ }
-        if (origin === B && !url.startsWith(B + "/api/transit/")) return r.continue();
+        if (origin === B && !url.startsWith(B + "/api/transit/")) return r.continue().catch(() => {});
         aborted.add(r);
         blocked.push(url);
-        r.abort();
+        r.abort().catch(() => {});
       });
-      await p.setViewport(width < 500 ? { width, height, isMobile: true, hasTouch: true } : { width, height });
+      await p.setViewport(phone ? { width, height, isMobile: true, hasTouch: true } : { width, height });
       const media = [...(isDark ? [{ name: "prefers-color-scheme", value: "dark" }] : []), ...(reduced ? [{ name: "prefers-reduced-motion", value: "reduce" }] : [])];
       if (media.length) await p.emulateMediaFeatures(media);
       try {
@@ -182,7 +209,17 @@ try {
         await p.waitForSelector("main > section.view:not([hidden])", { timeout: 10000 }).catch(() => notes.push(`${tag}: no view showed`));
         await p.evaluate(() => document.fonts.ready.then(() => {}));
         await wait(1500);
-        await p.screenshot({ path: file, fullPage: true });
+        await toTop(p);
+        if (phone) {
+          // A full-page capture beyond a mobile viewport draws the sticky header (and Home's banners inside it) one
+          // header-height too low. Make the viewport as tall as the page instead, so there's nothing beyond it.
+          const tall = await p.evaluate(() => document.documentElement.scrollHeight);
+          await p.setViewport({ width, height: Math.max(height, tall), isMobile: true, hasTouch: true });
+          await toTop(p);
+          await p.screenshot({ path: file, captureBeyondViewport: false });
+        } else {
+          await p.screenshot({ path: file, fullPage: true });
+        }
         shots.push(file);
       } catch (e) {
         bad = true;
@@ -202,8 +239,9 @@ try {
   bad = true;
   console.error(e.message);
 } finally {
+  stopping = true; // our own stop, not a crash
   await browser?.close().catch(() => {});
   stopServer();
-  if (profile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ }
+  dropProfile();
 }
-process.exit(bad ? 1 : 0);
+if (quitCode === null) process.exit(bad ? 1 : 0); // otherwise quit() exits with its own code
