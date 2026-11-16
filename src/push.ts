@@ -86,9 +86,9 @@ const halifaxMinutes = () => {
 const quiet = (s: Sub, now: number) => s.quiet_start != null && s.quiet_end != null && s.quiet_start !== s.quiet_end &&
   (s.quiet_start < s.quiet_end ? now >= s.quiet_start && now < s.quiet_end : now >= s.quiet_start || now < s.quiet_end);
 
-/** Browsers that would get an alert of this kind right now (not in their quiet hours). */
+/** Browsers that would get an alert of this kind right now (not in their quiet hours), longest-waiting first. */
 async function recipients(env: Env, kind: Kind) {
-  const rows = (await env.DB.prepare("SELECT endpoint, p256dh, auth, kinds, quiet_start, quiet_end FROM push_subs").all<Sub>()).results;
+  const rows = (await env.DB.prepare("SELECT endpoint, p256dh, auth, kinds, quiet_start, quiet_end FROM push_subs ORDER BY COALESCE(last_sent_at, 0) ASC, endpoint ASC").all<Sub>()).results;
   const now = halifaxMinutes();
   return rows.filter(s => { try { return JSON.parse(s.kinds).includes(kind) && !quiet(s, now); } catch { return false; } });
 }
@@ -109,8 +109,14 @@ async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone
   } catch { return "failed"; }
 }
 
-/** Send a published notice to every browser that wants its kind. Returns how many it reached. */
-export async function sendNotice(env: Env, id: string) {
+// The most browsers one send reaches. The account is on Workers Paid, which allows 1,000 subrequests per request; the
+// remaining ~100 are headroom for the D1 reads and the one batch write. Readers left over are counted as skipped.
+export const MAX_SEND = 900;
+
+/** Send a published notice to every browser that wants its kind, up to MAX_SEND, longest-waiting first. Returns how
+ *  many it reached. `opts.cap` only lowers the limit, for tests; callers pass just (env, id). */
+export async function sendNotice(env: Env, id: string, opts: { cap?: number } = {}) {
+  const cap = Math.max(0, Math.min(MAX_SEND, opts.cap ?? MAX_SEND));
   const s = await env.DB.prepare("SELECT id, kind, headline, dek, section, status_label, stage FROM stories WHERE id = ?")
     .bind(id).first<{ id: string; kind: string; headline: string; dek: string; section: string; status_label: string; stage: string }>();
   if (!s || s.kind !== "notice" || s.stage !== "developing") return { sent: 0, failed: 0, removed: 0, error: "Only live notices can be sent as alerts." };
@@ -120,7 +126,8 @@ export async function sendNotice(env: Env, id: string) {
     url: `/#article-${encodeURIComponent(s.id)}`, tag: s.id, at: Date.now(),
   }));
   if (payload.length > MAX_PAYLOAD_BYTES) return { sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." };
-  const list = await recipients(env, kind);
+  const everyone = await recipients(env, kind);
+  const list = everyone.slice(0, cap), skipped = everyone.length - list.length;
   const results: (readonly [Sub, Awaited<ReturnType<typeof deliver>>, number])[] = [];
   // Ten at a time keeps the Worker's open connections in check
   for (let i = 0; i < list.length; i += 10) {
@@ -133,14 +140,17 @@ export async function sendNotice(env: Env, id: string) {
   // refused, the fault is likely ours, so those count as ordinary failures rather than wiping every subscriber.
   const anyOk = results.some(([, r]) => r === "ok");
   let sent = 0, failed = 0, removed = 0;
+  // Every write goes in one batch at the end: one subrequest, and all or nothing
+  const writes: D1PreparedStatement[] = [];
   for (const [sub, r, now] of results) {
-    if (r === "ok") { sent++; await env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint).run(); }
-    else if (r === "gone" || (r === "refused" && anyOk)) { removed++; await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint).run(); }
-    else { failed++; await env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint).run(); }
+    if (r === "ok") { sent++; writes.push(env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint)); }
+    else if (r === "gone" || (r === "refused" && anyOk)) { removed++; writes.push(env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint)); }
+    else { failed++; writes.push(env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint)); }
   }
-  await env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES).run();
-  await env.DB.prepare("UPDATE stories SET push_count = ? WHERE id = ?").bind(sent, id).run();
-  return { sent, failed, removed, kind };
+  writes.push(env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES));
+  writes.push(env.DB.prepare("UPDATE stories SET push_count = ? WHERE id = ?").bind(sent, id));
+  await env.DB.batch(writes);
+  return { sent, failed, removed, skipped, kind };
 }
 
 /** Deletes subscriptions nothing has reached or changed in SWEEP_AFTER_DAYS, and any at MAX_FAILURES. Runs at most once

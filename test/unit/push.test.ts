@@ -3,7 +3,7 @@
 // refuses). No test reaches the network: fetch is stubbed, and only push.example.test answers.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Env } from "../../src/env";
-import { alertKind, countRecipients, pushApi, sendNotice, sweepSubscriptions } from "../../src/push";
+import { alertKind, countRecipients, MAX_SEND, pushApi, sendNotice, sweepSubscriptions } from "../../src/push";
 import { DAY, HOUR, env, makeStory, storyRow } from "./helpers";
 
 declare global {
@@ -533,6 +533,79 @@ describe("dead subscriptions don't linger (NOT-1 D2)", () => {
     await addSub(1);
     expect(await sendNotice(envOn, id)).toEqual({ sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("sending doesn't break partway (NOT-1 D3)", () => {
+  const notice = { kind: "notice", section: "Weather", headline: "Gale warning for Halifax", dek: "Winds gusting to 90 km/h tonight." };
+
+  /** env.DB, with every statement's run() and every batch counted, still running against the real database. */
+  function watchDb() {
+    const db = env.DB;
+    const ran: string[] = [];
+    const batches: number[] = [];
+    const watch = (stmt: D1PreparedStatement, sql: string): D1PreparedStatement => {
+      const bind = stmt.bind.bind(stmt), run = stmt.run.bind(stmt);
+      Object.defineProperty(stmt, "bind", { configurable: true, value: (...v: unknown[]) => watch(bind(...v), sql) });
+      Object.defineProperty(stmt, "run", { configurable: true, value: () => { ran.push(sql); return run(); } });
+      return stmt;
+    };
+    const DB = new Proxy(db, {
+      get(t, p) {
+        if (p === "prepare") return (sql: string) => watch(t.prepare(sql), sql);
+        if (p === "batch") return (list: D1PreparedStatement[]) => { batches.push(list.length); return t.batch(list); };
+        const v = Reflect.get(t, p, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    return { DB, ran, batches };
+  }
+
+  it("MAX_SEND is 900", () => expect(MAX_SEND).toBe(900));
+
+  it("reaches at most the cap, longest-waiting first, and counts the rest as skipped", async () => {
+    await makeStory("weather-gale", notice);
+    // last_sent_at: never, then 1,000 to 7,000; the three sent most recently wait for next time
+    const subs = [await addSub(1)];
+    for (let n = 2; n <= 8; n++) {
+      subs.push(await addSub(n));
+      await env.DB.prepare("UPDATE push_subs SET last_sent_at = ? WHERE endpoint = ?").bind((n - 1) * 1000, subs[n - 1].endpoint).run();
+    }
+    const r = await sendNotice(envOn, "weather-gale", { cap: 5 });
+    expect(r).toEqual({ sent: 5, failed: 0, removed: 0, skipped: 3, kind: "weather" });
+    expect(sent).toHaveLength(5);
+    expect(sent.map(s => s.url).sort()).toEqual(subs.slice(0, 5).map(s => s.endpoint).sort());
+    for (const s of subs.slice(5)) expect(sent.some(f => f.url === s.endpoint)).toBe(false);
+    expect(await countRecipients(envOn, "weather")).toBe(8);
+  });
+
+  it("a cap can only lower the limit", async () => {
+    await makeStory("weather-gale", notice);
+    for (let n = 1; n <= 3; n++) await addSub(n);
+    expect(await sendNotice(envOn, "weather-gale", { cap: 5000 })).toMatchObject({ sent: 3, skipped: 0 });
+    expect(await sendNotice(envOn, "weather-gale", { cap: -1 })).toMatchObject({ sent: 0, skipped: 3 });
+  });
+
+  it("writes everything in one batch at the end, and nothing outside it", async () => {
+    await makeStory("weather-gale", notice);
+    const answers: (number | "throw")[] = [201, 201, 404, 500, "throw"];
+    for (let i = 0; i < answers.length; i++) { const s = await addSub(i + 1, ["weather"], { failures: i === 3 ? 4 : 0 }); replies.set(s.endpoint, answers[i]); }
+    const w = watchDb();
+    await w.DB.prepare("UPDATE stories SET dek = dek WHERE id = ?").bind("weather-gale").run(); // the watch sees a run() outside a batch
+    expect(w.ran).toHaveLength(1);
+    w.ran.length = 0;
+    const r = await sendNotice({ ...envOn, DB: w.DB } as Env, "weather-gale");
+    expect(r).toEqual({ sent: 2, failed: 2, removed: 1, skipped: 0, kind: "weather" });
+    expect(w.ran.filter(sql => /push_subs|stories/.test(sql))).toEqual([]);
+    expect(w.batches).toEqual([answers.length + 2]); // one write per recipient, the failures purge, push_count
+    expect(await rowCount()).toBe(3); // 404 removed; the one at four failures reached five and went
+    expect((await storyRow("weather-gale"))!.push_count).toBe(2);
+  });
+
+  it("the result has sent, failed, removed, kind and skipped, and nothing else", async () => {
+    await makeStory("weather-gale", notice);
+    await addSub(1);
+    expect(Object.keys(await sendNotice(envOn, "weather-gale")).sort()).toEqual(["failed", "kind", "removed", "sent", "skipped"]);
   });
 });
 
