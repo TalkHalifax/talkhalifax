@@ -83,6 +83,10 @@ actually follow: their definitions in `.claude/agents/` and their policies in `.
   own project manager, who asks the orchestrator. The orchestrator engages the other team, or Agent Operations, and
   gives back the verdict. Project managers message only the orchestrator.
 - **Work reaches the site only through a pull request** that passes the `check` job and that the editor merges.
+- **Every job, change request and task is numbered by its pull request** (since #54, Nov. 16, 2026). The orchestrator
+  opens a draft pull request when a job starts to claim the number; the brief, branch (for example `site/54`), report
+  and Notion item all use it, and the live footer shows the deployed version as `v<number>`. Earlier jobs (named ids
+  such as PC-9, and CR-1 to CR-20) are in Notion's Job archive.
 
 ## A day in the newsroom
 
