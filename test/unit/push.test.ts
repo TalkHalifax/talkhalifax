@@ -85,8 +85,9 @@ afterEach(() => {
 let ipN = 0;
 const nextIp = () => { ipN++; return `10.0.${(ipN >> 8) & 255}.${ipN & 255}`; };
 
-interface CallOpts { method?: string; origin?: string | null; type?: string | null; ip?: string; base?: string; e?: Env }
-/** One request to pushApi, as the router would hand it over. Each gets its own IP unless the test sets one. */
+interface CallOpts { method?: string; origin?: string | null; type?: string | null; ip?: string; base?: string; e?: Env; raw?: string }
+/** One request to pushApi, as the router would hand it over. Each gets its own IP unless the test sets one. `raw`, when
+ *  set, is sent verbatim as the body instead of the JSON of `body`, for bodies JSON.stringify can't make (like null). */
 async function call(path: string, body?: unknown, o: CallOpts = {}) {
   const url = new URL(path, o.base ?? ORIGIN);
   const headers: Record<string, string> = { "cf-connecting-ip": o.ip ?? nextIp() };
@@ -94,8 +95,8 @@ async function call(path: string, body?: unknown, o: CallOpts = {}) {
   if (origin) headers.origin = origin;
   const type = o.type === undefined ? "application/json" : o.type;
   if (type) headers["content-type"] = type;
-  const method = o.method ?? (body === undefined ? "GET" : "POST");
-  const req = new Request(url, { method, headers, body: method === "GET" ? undefined : JSON.stringify(body ?? {}) });
+  const method = o.method ?? (body === undefined && o.raw === undefined ? "GET" : "POST");
+  const req = new Request(url, { method, headers, body: method === "GET" ? undefined : o.raw ?? JSON.stringify(body ?? {}) });
   const res = await pushApi(req, o.e ?? envOn, url);
   return { status: res.status, data: await res.json<any>() };
 }
@@ -318,6 +319,35 @@ describe("the routes' guards", () => {
     expect(await call("/api/push/unsubscribe", { endpoint: s.endpoint }, { origin: null })).toEqual({ status: 400, data: { error: "Bad request" } });
     expect(await call("/api/push/unsubscribe", { endpoint: s.endpoint }, { type: "text/plain" })).toEqual({ status: 400, data: { error: "Bad request" } });
     expect(await row(s.endpoint)).not.toBeNull();
+  });
+
+  // NOT-1 N3: a JSON body of null, which JSON.stringify(body ?? {}) can't send, so these pass it raw
+  it("subscribe with a body of null is an unrecognised address, and adds no one", async () => {
+    expect(await call("/api/push/subscribe", undefined, { raw: "null" })).toEqual({ status: 400, data: BAD_ADDRESS });
+    expect(await rowCount()).toBe(0);
+  });
+
+  it("status with a body of null is not subscribed", async () => {
+    await addSub(1);
+    expect(await call("/api/push/status", undefined, { raw: "null" })).toEqual({ status: 200, data: { subscribed: false } });
+  });
+
+  it("unsubscribe with a body of null answers ok and removes no one", async () => {
+    const s = await addSub(1);
+    expect(await call("/api/push/unsubscribe", undefined, { raw: "null" })).toEqual({ status: 200, data: { ok: true } });
+    expect(await row(s.endpoint)).not.toBeNull();
+    expect(await rowCount()).toBe(1);
+  });
+
+  it("a POST to a path it doesn't know answers 503 or 404, and counts against no limit", async () => {
+    const ip = "198.51.100.40";
+    const pushKeys = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_throttle WHERE key LIKE 'push:%'").first<{ n: number }>())!.n;
+    const before = await pushKeys();
+    expect(await call("/api/push/nope", {}, { ip, e: env })).toEqual({ status: 503, data: { error: "Alerts aren't switched on yet." } });
+    expect(await call("/api/push/nope", {}, { ip })).toEqual({ status: 404, data: { error: "Not found" } });
+    const forIp = await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_throttle WHERE key LIKE 'push:%' AND key LIKE ?").bind(`%${ip}`).first<{ n: number }>();
+    expect(forIp!.n).toBe(0);
+    expect(await pushKeys()).toBe(before);
   });
 });
 
