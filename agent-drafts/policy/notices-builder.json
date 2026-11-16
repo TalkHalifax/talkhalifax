@@ -1,0 +1,46 @@
+{
+  "agent": "notices-builder",
+  "level": "L2",
+  "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TaskStop", "WebFetch"],
+  "edit": {
+    "allow": [
+      "public/views/notices.js",
+      "public/alerts.js",
+      "src/push.ts",
+      "src/alerts.ts",
+      "test/unit/alerts.test.ts",
+      "test/unit/push.test.ts"
+    ],
+    "deny": []
+  },
+  "bash": [
+    ["npm", "test"],
+    ["npm", "run", "test:hooks"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["node", "test/e2e/look.mjs", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$", "re:^(/[#a-z0-9/_?=&-]*|#[a-z0-9/_?=&-]*|[a-z0-9][a-z0-9-]*|--dark|--mid)$"],
+    ["npm", "run", "test:e2e"],
+    ["npx", "tsc", "--noEmit"],
+    ["npx", "tsc", "-p", "test"],
+    ["npx", "wrangler", "d1", "migrations", "apply", "talkhalifax", "--local"],
+    ["npx", "wrangler", "dev"],
+    ["node", "--check", "re:^public/[a-z0-9-]+(/[a-z0-9-]+)*\\.js$"],
+    ["git", "status"],
+    ["git", "status", "--short"],
+    ["git", "diff"],
+    ["git", "diff", "--stat"],
+    ["git", "branch", "--show-current"],
+    ["git", "checkout", "-b", "re:^notices/[a-z0-9._-]+$"],
+    ["git", "add", "public/views/notices.js"],
+    ["git", "add", "public/alerts.js"],
+    ["git", "add", "src/push.ts"],
+    ["git", "add", "src/alerts.ts"],
+    ["git", "add", "test/unit/alerts.test.ts"],
+    ["git", "add", "test/unit/push.test.ts"],
+    ["git", "commit", "-m", "*"]
+  ],
+  "webfetch": ["developers.cloudflare.com", "developer.mozilla.org"]
+}
