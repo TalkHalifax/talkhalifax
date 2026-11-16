@@ -15,6 +15,11 @@ const DEFAULT_KINDS: Kind[] = ["weather", "outages", "safety", "other"];
 // Browsers' push services. Anything else is refused, so the Worker never posts to an address a stranger chose.
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com|wns2-[a-z0-9-]+\.notify\.windows\.com)$/;
 const TTL_S = 6 * 3600, MAX_FAILURES = 5;
+// Push services take about 4 KB once encrypted; the alert itself stays well under that
+const MAX_PAYLOAD_BYTES = 3000;
+// A subscription that hasn't been sent anything, or changed, in this long is assumed abandoned
+export const SWEEP_AFTER_DAYS = 180;
+const DAY_MS = 864e5;
 
 export const pushOn = (env: Env) => !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
 
@@ -89,7 +94,9 @@ async function recipients(env: Env, kind: Kind) {
 }
 export async function countRecipients(env: Env, kind: Kind) { return (await recipients(env, kind)).length; }
 
-async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone" | "failed"> {
+/** ok: delivered. gone: the push service says the subscription no longer exists (404, 410). refused: it turned this
+ *  request down (400, 403, 413), which may be the subscription's fault or ours. failed: anything else. */
+async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone" | "refused" | "failed"> {
   try {
     const r = await fetch(s.endpoint, {
       method: "POST",
@@ -97,6 +104,7 @@ async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone
       body: await encrypt(body, s.p256dh, s.auth),
     });
     if (r.status === 404 || r.status === 410) return "gone";
+    if (r.status === 400 || r.status === 403 || r.status === 413) return "refused";
     return r.ok ? "ok" : "failed";
   } catch { return "failed"; }
 }
@@ -111,21 +119,42 @@ export async function sendNotice(env: Env, id: string) {
     title: s.headline.slice(0, 120), body: (s.dek || s.status_label || "").slice(0, 200),
     url: `/#article-${encodeURIComponent(s.id)}`, tag: s.id, at: Date.now(),
   }));
+  if (payload.length > MAX_PAYLOAD_BYTES) return { sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." };
   const list = await recipients(env, kind);
-  let sent = 0, failed = 0, removed = 0;
+  const results: (readonly [Sub, Awaited<ReturnType<typeof deliver>>, number])[] = [];
   // Ten at a time keeps the Worker's open connections in check
   for (let i = 0; i < list.length; i += 10) {
-    const results = await Promise.all(list.slice(i, i + 10).map(async sub => [sub, await deliver(env, sub, payload)] as const));
+    const batch = await Promise.all(list.slice(i, i + 10).map(async sub => [sub, await deliver(env, sub, payload)] as const));
     const now = Date.now();
-    for (const [sub, r] of results) {
-      if (r === "ok") { sent++; await env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint).run(); }
-      else if (r === "gone") { removed++; await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint).run(); }
-      else { failed++; await env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint).run(); }
-    }
+    for (const [sub, r] of batch) results.push([sub, r, now]);
+  }
+  // A 400, 403 or 413 removes a subscription only if some other delivery in this send got through. 413 is about our
+  // payload, the same for everyone, and 400 or 403 is also what a bad VAPID key or token gets: if every delivery is
+  // refused, the fault is likely ours, so those count as ordinary failures rather than wiping every subscriber.
+  const anyOk = results.some(([, r]) => r === "ok");
+  let sent = 0, failed = 0, removed = 0;
+  for (const [sub, r, now] of results) {
+    if (r === "ok") { sent++; await env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint).run(); }
+    else if (r === "gone" || (r === "refused" && anyOk)) { removed++; await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint).run(); }
+    else { failed++; await env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint).run(); }
   }
   await env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES).run();
   await env.DB.prepare("UPDATE stories SET push_count = ? WHERE id = ?").bind(sent, id).run();
   return { sent, failed, removed, kind };
+}
+
+/** Deletes subscriptions nothing has reached or changed in SWEEP_AFTER_DAYS, and any at MAX_FAILURES. Runs at most once
+ *  a day (the 'push-sweep' feed row records when); rejects if the database does, so a caller sees the failure. */
+export async function sweepSubscriptions(env: Env): Promise<{ removed: number } | { skipped: true }> {
+  const now = Date.now();
+  const last = await env.DB.prepare("SELECT updated_at FROM feeds WHERE name = 'push-sweep'").first<{ updated_at: string }>();
+  if (last && now - Date.parse(last.updated_at) < DAY_MS) return { skipped: true };
+  const [del] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM push_subs WHERE COALESCE(last_sent_at, updated_at) < ? OR failures >= ?").bind(now - SWEEP_AFTER_DAYS * DAY_MS, MAX_FAILURES),
+    env.DB.prepare("INSERT INTO feeds (name, body, updated_at) VALUES ('push-sweep', '{}', ?) ON CONFLICT(name) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at")
+      .bind(new Date(now).toISOString().replace(/\.\d+Z$/, "Z")),
+  ]);
+  return { removed: del.meta.changes ?? 0 };
 }
 
 // ---------- readers turning alerts on and off ----------

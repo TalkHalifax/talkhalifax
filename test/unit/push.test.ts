@@ -3,8 +3,12 @@
 // refuses). No test reaches the network: fetch is stubbed, and only push.example.test answers.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Env } from "../../src/env";
-import { alertKind, countRecipients, pushApi, sendNotice } from "../../src/push";
-import { env, makeStory, storyRow } from "./helpers";
+import { alertKind, countRecipients, pushApi, sendNotice, sweepSubscriptions } from "../../src/push";
+import { DAY, HOUR, env, makeStory, storyRow } from "./helpers";
+
+declare global {
+  interface ImportMeta { glob(pattern: string, opts: { query: string; import: string; eager: true }): Record<string, unknown> }
+}
 
 const ORIGIN = "https://site.test";
 const PUSH_HOST = "push.example.test";
@@ -455,14 +459,14 @@ describe("sending a notice", () => {
     const other = await addSub(11, ["roads", "safety"]);
 
     const r = await sendNotice(envOn, "weather-gale");
-    expect(r).toEqual({ sent: 1, failed: 6, removed: 2, kind: "weather" });
+    // NOT-1 D2: with one delivery through, 400, 403 and 413 now remove the subscription too
+    expect(r).toMatchObject({ sent: 1, failed: 3, removed: 5, kind: "weather" });
     expect(sent.map(s => s.url).sort()).toEqual([...subs.map(s => s.endpoint), worn.endpoint].sort());
     expect(sent.some(s => s.url === quiet.endpoint || s.url === other.endpoint)).toBe(false);
 
     expect(await row(subs[0].endpoint)).toMatchObject({ last_sent_at: Date.parse("2026-01-15T17:00:00Z"), failures: 0 });
-    expect(await row(subs[1].endpoint)).toBeNull(); // 404
-    expect(await row(subs[2].endpoint)).toBeNull(); // 410
-    for (const s of subs.slice(3)) expect(await row(s.endpoint)).toMatchObject({ failures: 1, last_sent_at: null });
+    for (const i of [1, 2, 4, 5, 6]) expect(await row(subs[i].endpoint)).toBeNull(); // 404, 410, 400, 403, 413
+    for (const i of [3, 7]) expect(await row(subs[i].endpoint)).toMatchObject({ failures: 1, last_sent_at: null }); // 500, thrown
     expect(await row(worn.endpoint)).toBeNull(); // its fifth failure in a row
     expect(await row(quiet.endpoint)).toMatchObject({ failures: 0, last_sent_at: null });
     expect(await row(other.endpoint)).toMatchObject({ failures: 0, last_sent_at: null });
@@ -485,5 +489,127 @@ describe("sending a notice", () => {
     expect(Object.keys(payload).sort()).toEqual(["at", "body", "tag", "title", "url"]);
     expect(payload).toMatchObject({ title: notice.headline, body: notice.dek, url: "/#article-weather-gale", tag: "weather-gale" });
     expect(typeof payload.at).toBe("number");
+  });
+});
+
+describe("dead subscriptions don't linger (NOT-1 D2)", () => {
+  const notice = { kind: "notice", section: "Weather", headline: "Gale warning for Halifax", dek: "Winds gusting to 90 km/h tonight." };
+  const withAnswers = async (answers: (number | "throw")[]) => {
+    const subs = [];
+    for (let i = 0; i < answers.length; i++) { const s = await addSub(i + 1); replies.set(s.endpoint, answers[i]); subs.push(s); }
+    return subs;
+  };
+
+  it("when some delivery gets through, 400, 403, 404, 410 and 413 all remove the subscription", async () => {
+    await makeStory("weather-gale", notice);
+    const subs = await withAnswers([201, 400, 403, 404, 410, 413]);
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 1, failed: 0, removed: 5 });
+    expect(await row(subs[0].endpoint)).not.toBeNull();
+    for (const s of subs.slice(1)) expect(await row(s.endpoint)).toBeNull();
+  });
+
+  it("when nothing gets through, only 404 and 410 remove; 400, 403 and 413 count as failures", async () => {
+    await makeStory("weather-gale", notice);
+    const subs = await withAnswers([404, 410, 400, 403, 413]);
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 0, failed: 3, removed: 2 });
+    expect(await row(subs[0].endpoint)).toBeNull();
+    expect(await row(subs[1].endpoint)).toBeNull();
+    for (const s of subs.slice(2)) expect(await row(s.endpoint)).toMatchObject({ failures: 1 });
+  });
+
+  it("every delivery refused with 403, as a bad VAPID key would be, deletes no one", async () => {
+    await makeStory("weather-gale", notice);
+    const subs = await withAnswers([403, 403, 403, 403]);
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 0, failed: 4, removed: 0 });
+    expect(await rowCount()).toBe(4);
+    for (const s of subs) expect(await row(s.endpoint)).toMatchObject({ failures: 1 });
+  });
+
+  it("an alert too big to send is refused before anything is fetched", async () => {
+    // The id goes into both tag and url, so a long one takes the payload past 3,000 bytes
+    const id = "weather-" + "x".repeat(1600);
+    await env.DB.prepare("INSERT INTO stories (id, kind, section, headline, dek, source_url, published_at, stage, updated_at) VALUES (?, 'notice', 'Weather', ?, ?, 'https://weather.gc.ca/', ?, 'developing', ?)")
+      .bind(id, notice.headline, notice.dek, "2026-11-16T00:00:00Z", "2026-11-16T00:00:00Z").run();
+    await addSub(1);
+    expect(await sendNotice(envOn, id)).toEqual({ sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." });
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe("sweeping abandoned subscriptions (NOT-1 D2)", () => {
+  const NOW = Date.parse("2026-11-16T12:00:00Z");
+  const days = (n: number) => NOW - n * DAY;
+  const put = (n: number, cols: { last_sent_at?: number | null; updated_at: number; failures?: number }) =>
+    env.DB.prepare("INSERT INTO push_subs (endpoint, p256dh, auth, kinds, created_at, updated_at, last_sent_at, failures) VALUES (?, ?, ?, '[\"weather\"]', ?, ?, ?, ?)")
+      .bind(keep(`https://${PUSH_HOST}/sweep/${n}`), keys.p256dh, keys.auth, cols.updated_at, cols.updated_at, cols.last_sent_at ?? null, cols.failures ?? 0).run();
+  const left = async () => (await env.DB.prepare("SELECT endpoint FROM push_subs ORDER BY endpoint").all<{ endpoint: string }>()).results.map(r => r.endpoint.split("/").pop());
+  const seed = async () => {
+    await put(1, { last_sent_at: days(181), updated_at: days(181) }); // gone: nothing sent in 181 days
+    await put(2, { last_sent_at: null, updated_at: days(181) }); // gone: never sent, unchanged in 181 days
+    await put(3, { updated_at: days(1), failures: 5 }); // gone: five failures
+    await put(4, { last_sent_at: days(1), updated_at: days(400) }); // kept: sent yesterday
+    await put(5, { updated_at: days(179) }); // kept: changed 179 days ago
+  };
+  beforeEach(() => at("2026-11-16T12:00:00Z"));
+
+  it("deletes the abandoned and the failing, keeps the rest, and says how many", async () => {
+    await seed();
+    expect(await sweepSubscriptions(envOn)).toEqual({ removed: 3 });
+    expect(await left()).toEqual(["4", "5"]);
+    expect(await env.DB.prepare("SELECT body, updated_at FROM feeds WHERE name = 'push-sweep'").first()).toEqual({ body: "{}", updated_at: "2026-11-16T12:00:00Z" });
+  });
+
+  it("runs at most once a day", async () => {
+    await seed();
+    await sweepSubscriptions(envOn);
+    await put(6, { updated_at: days(300) });
+    vi.setSystemTime(NOW + 23 * HOUR);
+    expect(await sweepSubscriptions(envOn)).toEqual({ skipped: true });
+    expect(await left()).toEqual(["4", "5", "6"]);
+    await env.DB.prepare("UPDATE feeds SET updated_at = ? WHERE name = 'push-sweep'").bind(new Date(NOW + 23 * HOUR - 25 * HOUR).toISOString()).run();
+    expect(await sweepSubscriptions(envOn)).toEqual({ removed: 1 });
+    expect(await left()).toEqual(["4", "5"]);
+  });
+
+  it("two sweeps at once both finish, and leave what one would", async () => {
+    await seed();
+    const results = await Promise.all([sweepSubscriptions(envOn), sweepSubscriptions(envOn)]);
+    expect(await left()).toEqual(["4", "5"]);
+    expect(results.reduce((n, r) => n + ("removed" in r ? r.removed : 0), 0)).toBe(3);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM feeds WHERE name = 'push-sweep'").first<{ n: number }>())!.n).toBe(1);
+  });
+
+  it("rejects when the database does, without an endpoint or key in the error", async () => {
+    await seed();
+    const db = env.DB;
+    const broken = new Proxy(db, {
+      get(t, p) {
+        if (p === "batch") return () => Promise.reject(new Error("D1_ERROR: database is unavailable"));
+        const v = Reflect.get(t, p, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    const err = await sweepSubscriptions({ ...envOn, DB: broken } as Env).then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const text = `${(err as Error).message}\n${(err as Error).stack}`;
+    expect([...secrets].filter(s => text.includes(s))).toHaveLength(0);
+    expect(await left()).toEqual(["1", "2", "3", "4", "5"]);
+  });
+});
+
+describe("the source itself (NOT-1 D2)", () => {
+  const sources = {
+    ...import.meta.glob("../../src/**/*.ts", { query: "?raw", import: "default", eager: true }),
+    ...import.meta.glob("./*.ts", { query: "?raw", import: "default", eager: true }),
+  } as Record<string, string>;
+
+  it("push.ts never writes to the console", () => {
+    expect(sources["../../src/push.ts"]).toBeTypeOf("string");
+    expect(sources["../../src/push.ts"]).not.toMatch(/console\./);
+  });
+  it("sweepSubscriptions is used nowhere else yet, in src or the unit tests", () => {
+    expect(Object.keys(sources).length).toBeGreaterThan(20);
+    const users = Object.entries(sources).filter(([f, text]) => f !== "../../src/push.ts" && f !== "./push.test.ts" && /sweepSubscriptions/.test(text)).map(([f]) => f);
+    expect(users).toEqual([]);
   });
 });
