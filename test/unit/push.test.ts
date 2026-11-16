@@ -298,26 +298,72 @@ describe("the routes' guards", () => {
     expect(off.data.kinds).toHaveLength(6);
   });
 
-  it("without VAPID keys, subscribe, status and unsubscribe each return 503", async () => {
-    for (const [path, body] of [["/api/push/subscribe", { subscription: subscription(ep) }], ["/api/push/status", { endpoint: ep }], ["/api/push/unsubscribe", { endpoint: ep }]] as const) {
+  it("without VAPID keys, subscribe and status return 503, but unsubscribe still works", async () => {
+    for (const [path, body] of [["/api/push/subscribe", { subscription: subscription(ep) }], ["/api/push/status", { endpoint: ep }]] as const) {
       expect(await call(path, body, { e: env })).toEqual({ status: 503, data: { error: "Alerts aren't switched on yet." } });
     }
     expect(await rowCount()).toBe(0);
+    // NOT-1 D1: a reader can always withdraw, even with alerts switched off
+    const s = await addSub(1);
+    expect(await call("/api/push/unsubscribe", { endpoint: s.endpoint }, { e: env })).toEqual({ status: 200, data: { ok: true } });
+    expect(await row(s.endpoint)).toBeNull();
   });
 
-  it("allows 30 changes an hour from one address, across the three routes, and not a 31st; another address is unaffected", async () => {
+  it("unsubscribing still needs the site's origin and a JSON body", async () => {
+    const s = await addSub(1);
+    expect(await call("/api/push/unsubscribe", { endpoint: s.endpoint }, { origin: null })).toEqual({ status: 400, data: { error: "Bad request" } });
+    expect(await call("/api/push/unsubscribe", { endpoint: s.endpoint }, { type: "text/plain" })).toEqual({ status: 400, data: { error: "Bad request" } });
+    expect(await row(s.endpoint)).not.toBeNull();
+  });
+});
+
+describe("rate limits: one per route, so using one up never blocks the others", () => {
+  const ep = "https://fcm.googleapis.com/fcm/send/limits";
+  const tooMany = { status: 429, data: { error: "Too many changes from here. Try again in an hour." } };
+  // Hundreds of real requests take minutes here, so after a few real ones the window's count is moved on to just
+  // below the limit; allow() then counts the rest exactly as it would have
+  const fastForward = (key: string, count: number) => env.DB.prepare("UPDATE auth_throttle SET count = ? WHERE key = ?").bind(count, key).run();
+
+  it("allows 30 subscribes an hour from one address and not a 31st; unsubscribe and status still work there, and another address is unaffected", async () => {
     const ip = "198.51.100.7";
-    for (let i = 0; i < 10; i++) {
-      expect((await subscribe(ep, {}, { ip })).status).toBe(200);
-      expect((await call("/api/push/status", { endpoint: ep }, { ip })).status).toBe(200);
-      expect((await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).status).toBe(200);
-    }
-    const tooMany = { status: 429, data: { error: "Too many changes from here. Try again in an hour." } };
+    for (let i = 0; i < 3; i++) expect((await subscribe(ep, {}, { ip })).status).toBe(200);
+    await fastForward(`push:${ip}`, 29);
+    expect((await subscribe(ep, {}, { ip })).status).toBe(200); // the 30th
     expect(await subscribe(ep, {}, { ip })).toEqual(tooMany); // the 31st
-    expect(await call("/api/push/status", { endpoint: ep }, { ip })).toEqual(tooMany);
-    expect(await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).toEqual(tooMany);
-    expect(await rowCount()).toBe(0);
+    expect(await call("/api/push/status", { endpoint: ep }, { ip })).toEqual({ status: 200, data: { subscribed: true, kinds: DEFAULT_KINDS, quiet: null } });
+    expect(await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).toEqual({ status: 200, data: { ok: true } });
+    expect(await row(ep)).toBeNull();
+    expect(await call("/api/push/status", { endpoint: ep }, { ip })).toEqual({ status: 200, data: { subscribed: false } });
     expect((await subscribe(ep, {}, { ip: "198.51.100.8" })).status).toBe(200);
+  });
+
+
+  it("allows 600 status checks an hour and not a 601st, without touching subscribing", async () => {
+    const ip = "198.51.100.9";
+    for (let i = 0; i < 5; i++) expect((await call("/api/push/status", { endpoint: ep }, { ip })).status).toBe(200);
+    expect((await env.DB.prepare("SELECT count FROM auth_throttle WHERE key = ?").bind(`push:status:${ip}`).first<{ count: number }>())!.count).toBe(5);
+    await fastForward(`push:status:${ip}`, 599);
+    expect((await call("/api/push/status", { endpoint: ep }, { ip })).status).toBe(200); // the 600th
+    expect(await call("/api/push/status", { endpoint: ep }, { ip })).toEqual(tooMany); // the 601st
+    expect((await subscribe(ep, {}, { ip })).status).toBe(200);
+  });
+
+  it("allows 300 unsubscribes an hour and not a 301st", async () => {
+    const ip = "198.51.100.10";
+    for (let i = 0; i < 5; i++) expect((await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).status).toBe(200);
+    expect((await env.DB.prepare("SELECT count FROM auth_throttle WHERE key = ?").bind(`push:off:${ip}`).first<{ count: number }>())!.count).toBe(5);
+    await fastForward(`push:off:${ip}`, 299);
+    expect((await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).status).toBe(200); // the 300th
+    expect(await call("/api/push/unsubscribe", { endpoint: ep }, { ip })).toEqual(tooMany); // the 301st
+  });
+
+  it("keeps each route's count under its own key", async () => {
+    const ip = "198.51.100.11";
+    await subscribe(ep, {}, { ip });
+    await call("/api/push/status", { endpoint: ep }, { ip });
+    await call("/api/push/unsubscribe", { endpoint: ep }, { ip });
+    const keys = (await env.DB.prepare("SELECT key FROM auth_throttle WHERE key LIKE 'push:%' ORDER BY key").all<{ key: string }>()).results.map(r => r.key);
+    expect(keys).toEqual([`push:${ip}`, `push:off:${ip}`, `push:status:${ip}`]);
   });
 });
 

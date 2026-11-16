@@ -146,12 +146,30 @@ export async function pushApi(req: Request, env: Env, url: URL): Promise<Respons
   if (path === "/api/push" && req.method === "GET")
     return json({ enabled: pushOn(env), publicKey: env.VAPID_PUBLIC_KEY || null, kinds: KINDS.map(k => ({ id: k, label: KIND_LABELS[k], default: DEFAULT_KINDS.includes(k) })) });
   if (req.method !== "POST" || !sameOrigin(req, url)) return json({ error: "Bad request" }, { status: 400 });
-  if (!pushOn(env)) return json({ error: "Alerts aren't switched on yet." }, { status: 503 });
   const ip = req.headers.get("cf-connecting-ip") || "local";
-  if (!await allow(env, `push:${ip}`, 30, 36e5)) return json({ error: "Too many changes from here. Try again in an hour." }, { status: 429 });
-  const body = await req.json<any>().catch(() => ({}));
+  const tooMany = () => json({ error: "Too many changes from here. Try again in an hour." }, { status: 429 });
+  const readBody = async () => { const b = await req.json<any>().catch(() => null); return b && typeof b === "object" ? b : {}; };
+
+  // A reader can always withdraw: before the switch-on check, and with a limit of its own that changing choices can't use up
+  if (path === "/api/push/unsubscribe") {
+    if (!await allow(env, `push:off:${ip}`, 300, 36e5)) return tooMany();
+    const endpoint = String((await readBody()).endpoint || "").slice(0, 1000);
+    await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(endpoint).run();
+    return json({ ok: true });
+  }
+  if (!pushOn(env)) return json({ error: "Alerts aren't switched on yet." }, { status: 503 });
+
+  if (path === "/api/push/status") {
+    // The page asks on every visit, so checking has its own, roomier limit
+    if (!await allow(env, `push:status:${ip}`, 600, 36e5)) return tooMany();
+    const endpoint = String((await readBody()).endpoint || "").slice(0, 1000);
+    const r = await env.DB.prepare("SELECT kinds, quiet_start, quiet_end FROM push_subs WHERE endpoint = ?").bind(endpoint).first<{ kinds: string; quiet_start: number | null; quiet_end: number | null }>();
+    return json(r ? { subscribed: true, kinds: JSON.parse(r.kinds), quiet: r.quiet_start != null && r.quiet_end != null ? { start: r.quiet_start, end: r.quiet_end } : null } : { subscribed: false });
+  }
 
   if (path === "/api/push/subscribe") {
+    if (!await allow(env, `push:${ip}`, 30, 36e5)) return tooMany();
+    const body = await readBody();
     const sub = checkSub(body.subscription, url);
     if (!sub) return json({ error: "That browser's alert address wasn't recognised." }, { status: 400 });
     const kinds = Array.isArray(body.kinds) ? KINDS.filter(k => body.kinds.includes(k)) : DEFAULT_KINDS;
@@ -164,15 +182,6 @@ export async function pushApi(req: Request, env: Env, url: URL): Promise<Respons
          quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, updated_at = excluded.updated_at, failures = 0`,
     ).bind(sub.endpoint, sub.p256dh, sub.auth, JSON.stringify(kinds), qs, qe, now, now).run();
     return json({ ok: true, kinds, quiet: qs != null && qe != null ? { start: qs, end: qe } : null });
-  }
-  const endpoint = String(body.endpoint || "").slice(0, 1000);
-  if (path === "/api/push/status") {
-    const r = await env.DB.prepare("SELECT kinds, quiet_start, quiet_end FROM push_subs WHERE endpoint = ?").bind(endpoint).first<{ kinds: string; quiet_start: number | null; quiet_end: number | null }>();
-    return json(r ? { subscribed: true, kinds: JSON.parse(r.kinds), quiet: r.quiet_start != null && r.quiet_end != null ? { start: r.quiet_start, end: r.quiet_end } : null } : { subscribed: false });
-  }
-  if (path === "/api/push/unsubscribe") {
-    await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(endpoint).run();
-    return json({ ok: true });
   }
   return json({ error: "Not found" }, { status: 404 });
 }
