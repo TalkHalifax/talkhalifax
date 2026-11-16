@@ -351,6 +351,12 @@ try {
     ok(r.status === 200 && typeof r.body?.enabled === "boolean" && r.body?.kinds?.length === 6, "api: /api/push gives its switch and six kinds", http(r));
     r = await api("POST", "/api/push/subscribe", { json: {}, origin: null });
     ok(r.status === 400, "api: /api/push/subscribe refuses a request without an origin", http(r));
+    r = await api("GET", "/api/push");
+    ok(r.status === 200 && r.body?.enabled === false, "api: the e2e Worker runs with alerts switched off (no VAPID keys)", http(r));
+    r = await api("POST", "/api/push/unsubscribe", { json: { endpoint: "https://fcm.googleapis.com/fcm/send/e2e-not-subscribed" } });
+    ok(r.status === 200 && JSON.stringify(r.body) === '{"ok":true}', "api: /api/push/unsubscribe with alerts switched off answers 200 {ok:true}, for an endpoint that isn't subscribed", http(r));
+    r = await api("POST", "/api/push/unsubscribe", { json: null });
+    ok(r.status === 200 && JSON.stringify(r.body) === '{"ok":true}', "api: /api/push/unsubscribe treats a JSON null body as {} (200 {ok:true})", http(r));
     r = await api("PUT", "/api/newsroom/stories/e2e-nope", { json: {} });
     ok(r.status === 401 && r.body?.error === "Unauthorized", "api: the newsroom API without its token is 401", http(r));
 

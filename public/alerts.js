@@ -97,10 +97,15 @@
 
   async function turnOff() {
     busy = true; err = ""; note = ""; render();
-    try {
-      if (sub) { await post("/api/push/unsubscribe", { endpoint: sub.endpoint }); await sub.unsubscribe().catch(() => {}); }
-      sub = null; saved = null; note = "Alerts are off, and this device's alert address is deleted.";
-    } catch (e) { err = e.message || "That didn't work. Try again."; }
+    let reached = true;
+    if (sub) {
+      try { await post("/api/push/unsubscribe", { endpoint: sub.endpoint }); } catch { reached = false; }
+      // Always stop this browser's subscription, even offline or if the server said no: turning off must never fail
+      await sub.unsubscribe().catch(() => {});
+    }
+    sub = null; saved = null;
+    note = reached ? "Alerts are off, and this device's alert address is deleted."
+      : "Alerts are off on this device. We couldn't reach TalkHalifax to delete its alert address, so it will be removed when the next alert can't reach it.";
     busy = false; render();
   }
 

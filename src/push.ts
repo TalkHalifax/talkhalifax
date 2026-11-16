@@ -15,6 +15,11 @@ const DEFAULT_KINDS: Kind[] = ["weather", "outages", "safety", "other"];
 // Browsers' push services. Anything else is refused, so the Worker never posts to an address a stranger chose.
 const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com|wns2-[a-z0-9-]+\.notify\.windows\.com)$/;
 const TTL_S = 6 * 3600, MAX_FAILURES = 5;
+// Push services take about 4 KB once encrypted; the alert itself stays well under that
+const MAX_PAYLOAD_BYTES = 3000;
+// A subscription that hasn't been sent anything, or changed, in this long is assumed abandoned
+export const SWEEP_AFTER_DAYS = 180;
+const DAY_MS = 864e5;
 
 export const pushOn = (env: Env) => !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
 
@@ -81,15 +86,17 @@ const halifaxMinutes = () => {
 const quiet = (s: Sub, now: number) => s.quiet_start != null && s.quiet_end != null && s.quiet_start !== s.quiet_end &&
   (s.quiet_start < s.quiet_end ? now >= s.quiet_start && now < s.quiet_end : now >= s.quiet_start || now < s.quiet_end);
 
-/** Browsers that would get an alert of this kind right now (not in their quiet hours). */
+/** Browsers that would get an alert of this kind right now (not in their quiet hours), longest-waiting first. */
 async function recipients(env: Env, kind: Kind) {
-  const rows = (await env.DB.prepare("SELECT endpoint, p256dh, auth, kinds, quiet_start, quiet_end FROM push_subs").all<Sub>()).results;
+  const rows = (await env.DB.prepare("SELECT endpoint, p256dh, auth, kinds, quiet_start, quiet_end FROM push_subs ORDER BY COALESCE(last_sent_at, 0) ASC, endpoint ASC").all<Sub>()).results;
   const now = halifaxMinutes();
   return rows.filter(s => { try { return JSON.parse(s.kinds).includes(kind) && !quiet(s, now); } catch { return false; } });
 }
 export async function countRecipients(env: Env, kind: Kind) { return (await recipients(env, kind)).length; }
 
-async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone" | "failed"> {
+/** ok: delivered. gone: the push service says the subscription no longer exists (404, 410). refused: it turned this
+ *  request down (400, 403, 413), which may be the subscription's fault or ours. failed: anything else. */
+async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone" | "refused" | "failed"> {
   try {
     const r = await fetch(s.endpoint, {
       method: "POST",
@@ -97,12 +104,19 @@ async function deliver(env: Env, s: Sub, body: Uint8Array): Promise<"ok" | "gone
       body: await encrypt(body, s.p256dh, s.auth),
     });
     if (r.status === 404 || r.status === 410) return "gone";
+    if (r.status === 400 || r.status === 403 || r.status === 413) return "refused";
     return r.ok ? "ok" : "failed";
   } catch { return "failed"; }
 }
 
-/** Send a published notice to every browser that wants its kind. Returns how many it reached. */
-export async function sendNotice(env: Env, id: string) {
+// The most browsers one send reaches. The account is on Workers Paid, which allows 1,000 subrequests per request; the
+// remaining ~100 are headroom for the D1 reads and the one batch write. Readers left over are counted as skipped.
+export const MAX_SEND = 900;
+
+/** Send a published notice to every browser that wants its kind, up to MAX_SEND, longest-waiting first. Returns how
+ *  many it reached. `opts.cap` only lowers the limit, for tests; callers pass just (env, id). */
+export async function sendNotice(env: Env, id: string, opts: { cap?: number } = {}) {
+  const cap = Math.max(0, Math.min(MAX_SEND, opts.cap ?? MAX_SEND));
   const s = await env.DB.prepare("SELECT id, kind, headline, dek, section, status_label, stage FROM stories WHERE id = ?")
     .bind(id).first<{ id: string; kind: string; headline: string; dek: string; section: string; status_label: string; stage: string }>();
   if (!s || s.kind !== "notice" || s.stage !== "developing") return { sent: 0, failed: 0, removed: 0, error: "Only live notices can be sent as alerts." };
@@ -111,21 +125,52 @@ export async function sendNotice(env: Env, id: string) {
     title: s.headline.slice(0, 120), body: (s.dek || s.status_label || "").slice(0, 200),
     url: `/#article-${encodeURIComponent(s.id)}`, tag: s.id, at: Date.now(),
   }));
-  const list = await recipients(env, kind);
-  let sent = 0, failed = 0, removed = 0;
+  if (payload.length > MAX_PAYLOAD_BYTES) return { sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." };
+  const everyone = await recipients(env, kind);
+  const list = everyone.slice(0, cap), skipped = everyone.length - list.length;
+  const results: (readonly [Sub, Awaited<ReturnType<typeof deliver>>, number])[] = [];
   // Ten at a time keeps the Worker's open connections in check
   for (let i = 0; i < list.length; i += 10) {
-    const results = await Promise.all(list.slice(i, i + 10).map(async sub => [sub, await deliver(env, sub, payload)] as const));
+    const batch = await Promise.all(list.slice(i, i + 10).map(async sub => [sub, await deliver(env, sub, payload)] as const));
     const now = Date.now();
-    for (const [sub, r] of results) {
-      if (r === "ok") { sent++; await env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint).run(); }
-      else if (r === "gone") { removed++; await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint).run(); }
-      else { failed++; await env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint).run(); }
-    }
+    for (const [sub, r] of batch) results.push([sub, r, now]);
   }
-  await env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES).run();
-  await env.DB.prepare("UPDATE stories SET push_count = ? WHERE id = ?").bind(sent, id).run();
-  return { sent, failed, removed, kind };
+  // A 400, 403 or 413 removes a subscription only if some other delivery in this send, to the same push service (the
+  // endpoint's origin), got through. 413 is about our payload, the same for everyone, and 400 or 403 is also what a bad
+  // VAPID key or token gets, or a push service that's having trouble: if every delivery to a service is refused, the
+  // fault is likely ours or its, so those count as ordinary failures rather than wiping every subscriber there. An
+  // endpoint that won't parse, or has an opaque origin, never counts as a success at any service.
+  const originOf = (endpoint: string) => { try { const o = new URL(endpoint).origin; return o === "null" ? null : o; } catch { return null; } };
+  const okOrigins = new Set<string>();
+  for (const [sub, r] of results) { const o = r === "ok" ? originOf(sub.endpoint) : null; if (o) okOrigins.add(o); }
+  const okHere = (sub: Sub) => { const o = originOf(sub.endpoint); return o !== null && okOrigins.has(o); };
+  let sent = 0, failed = 0, removed = 0;
+  // Every write goes in one batch at the end: one subrequest, and all or nothing
+  const writes: D1PreparedStatement[] = [];
+  for (const [sub, r, now] of results) {
+    if (r === "ok") { sent++; writes.push(env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint)); }
+    else if (r === "gone" || (r === "refused" && okHere(sub))) { removed++; writes.push(env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint)); }
+    else { failed++; writes.push(env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint)); }
+  }
+  writes.push(env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES));
+  writes.push(env.DB.prepare("UPDATE stories SET push_count = ? WHERE id = ?").bind(sent, id));
+  await env.DB.batch(writes);
+  return { sent, failed, removed, skipped, kind };
+}
+
+/** Deletes subscriptions nothing has reached or changed in SWEEP_AFTER_DAYS (counted from whichever was later), and any
+ *  at MAX_FAILURES. Runs at most once
+ *  a day (the 'push-sweep' feed row records when); rejects if the database does, so a caller sees the failure. */
+export async function sweepSubscriptions(env: Env): Promise<{ removed: number } | { skipped: true }> {
+  const now = Date.now();
+  const last = await env.DB.prepare("SELECT updated_at FROM feeds WHERE name = 'push-sweep'").first<{ updated_at: string }>();
+  if (last && now - Date.parse(last.updated_at) < DAY_MS) return { skipped: true };
+  const [del] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM push_subs WHERE MAX(COALESCE(last_sent_at, 0), updated_at) < ? OR failures >= ?").bind(now - SWEEP_AFTER_DAYS * DAY_MS, MAX_FAILURES),
+    env.DB.prepare("INSERT INTO feeds (name, body, updated_at) VALUES ('push-sweep', '{}', ?) ON CONFLICT(name) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at")
+      .bind(new Date(now).toISOString().replace(/\.\d+Z$/, "Z")),
+  ]);
+  return { removed: del.meta.changes ?? 0 };
 }
 
 // ---------- readers turning alerts on and off ----------
@@ -146,12 +191,30 @@ export async function pushApi(req: Request, env: Env, url: URL): Promise<Respons
   if (path === "/api/push" && req.method === "GET")
     return json({ enabled: pushOn(env), publicKey: env.VAPID_PUBLIC_KEY || null, kinds: KINDS.map(k => ({ id: k, label: KIND_LABELS[k], default: DEFAULT_KINDS.includes(k) })) });
   if (req.method !== "POST" || !sameOrigin(req, url)) return json({ error: "Bad request" }, { status: 400 });
-  if (!pushOn(env)) return json({ error: "Alerts aren't switched on yet." }, { status: 503 });
   const ip = req.headers.get("cf-connecting-ip") || "local";
-  if (!await allow(env, `push:${ip}`, 30, 36e5)) return json({ error: "Too many changes from here. Try again in an hour." }, { status: 429 });
-  const body = await req.json<any>().catch(() => ({}));
+  const tooMany = () => json({ error: "Too many changes from here. Try again in an hour." }, { status: 429 });
+  const readBody = async () => { const b = await req.json<any>().catch(() => null); return b && typeof b === "object" ? b : {}; };
+
+  // A reader can always withdraw: before the switch-on check, and with a limit of its own that changing choices can't use up
+  if (path === "/api/push/unsubscribe") {
+    if (!await allow(env, `push:off:${ip}`, 300, 36e5)) return tooMany();
+    const endpoint = String((await readBody()).endpoint || "").slice(0, 1000);
+    await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(endpoint).run();
+    return json({ ok: true });
+  }
+  if (!pushOn(env)) return json({ error: "Alerts aren't switched on yet." }, { status: 503 });
+
+  if (path === "/api/push/status") {
+    // The page asks on every visit, so checking has its own, roomier limit
+    if (!await allow(env, `push:status:${ip}`, 600, 36e5)) return tooMany();
+    const endpoint = String((await readBody()).endpoint || "").slice(0, 1000);
+    const r = await env.DB.prepare("SELECT kinds, quiet_start, quiet_end FROM push_subs WHERE endpoint = ?").bind(endpoint).first<{ kinds: string; quiet_start: number | null; quiet_end: number | null }>();
+    return json(r ? { subscribed: true, kinds: JSON.parse(r.kinds), quiet: r.quiet_start != null && r.quiet_end != null ? { start: r.quiet_start, end: r.quiet_end } : null } : { subscribed: false });
+  }
 
   if (path === "/api/push/subscribe") {
+    if (!await allow(env, `push:${ip}`, 30, 36e5)) return tooMany();
+    const body = await readBody();
     const sub = checkSub(body.subscription, url);
     if (!sub) return json({ error: "That browser's alert address wasn't recognised." }, { status: 400 });
     const kinds = Array.isArray(body.kinds) ? KINDS.filter(k => body.kinds.includes(k)) : DEFAULT_KINDS;
@@ -164,15 +227,6 @@ export async function pushApi(req: Request, env: Env, url: URL): Promise<Respons
          quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, updated_at = excluded.updated_at, failures = 0`,
     ).bind(sub.endpoint, sub.p256dh, sub.auth, JSON.stringify(kinds), qs, qe, now, now).run();
     return json({ ok: true, kinds, quiet: qs != null && qe != null ? { start: qs, end: qe } : null });
-  }
-  const endpoint = String(body.endpoint || "").slice(0, 1000);
-  if (path === "/api/push/status") {
-    const r = await env.DB.prepare("SELECT kinds, quiet_start, quiet_end FROM push_subs WHERE endpoint = ?").bind(endpoint).first<{ kinds: string; quiet_start: number | null; quiet_end: number | null }>();
-    return json(r ? { subscribed: true, kinds: JSON.parse(r.kinds), quiet: r.quiet_start != null && r.quiet_end != null ? { start: r.quiet_start, end: r.quiet_end } : null } : { subscribed: false });
-  }
-  if (path === "/api/push/unsubscribe") {
-    await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(endpoint).run();
-    return json({ ok: true });
   }
   return json({ error: "Not found" }, { status: 404 });
 }
