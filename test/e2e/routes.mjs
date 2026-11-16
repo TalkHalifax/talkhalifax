@@ -3,7 +3,7 @@
 //   npm run test:e2e
 // Uses Chrome or Edge from the system, or the one at CHROME_PATH.
 import { execSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
@@ -79,6 +79,15 @@ const npx = args => execSync(`npx ${args.join(" ")}`, { stdio: "pipe", env: { ..
 
 let fails = 0;
 const ok = (c, label, extra = "") => { console.log(`${c ? "PASS" : "FAIL"} ${label}${extra ? ` (${extra})` : ""}`); if (!c) fails++; };
+
+// The site version: the deploy stamps v<PR number> over exactly one "dev" in each file, so each must be there once (docs/DESIGN-SYSTEM.md, "Site version")
+{
+  const occurs = (file, str) => readFileSync(file, "utf8").split(str).length - 1;
+  const html = occurs("public/index.html", '<span class="sf-ver" id="sfVer">dev</span>');
+  ok(html === 1, "public/index.html has the footer's version placeholder exactly once", `found ${html}`);
+  const sw = occurs("public/sw.js", 'const BUILD = "dev";');
+  ok(sw === 1, "public/sw.js has the service worker's version placeholder exactly once", `found ${sw}`);
+}
 
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
@@ -164,6 +173,21 @@ try {
       } else {
         ok((await p.evaluate(() => document.getElementById("hdrWx").innerText)).includes("Feels like 15°C"), `${label}: it reads as feels like`);
       }
+      await p.close();
+    }
+
+    // The footer: the site version (dev until the deploy stamps v<PR number>), and what the site says about itself
+    {
+      const p = await open("home");
+      const { ver, foot } = await p.evaluate(() => ({
+        ver: document.getElementById("sfVer")?.textContent ?? "",
+        foot: (document.querySelector(".site-foot")?.textContent ?? "").replace(/\s+/g, " "),
+      }));
+      ok(/^(dev|v\d+)$/.test(ver), `${label}: the footer shows a site version, dev or v<PR number>`, ver);
+      ok(ver === "dev", `${label}: an unstamped local site shows dev`, ver);
+      ok(!foot.includes("TalkHalifax is a prototype"), `${label}: the footer no longer calls the site a prototype`);
+      ok(foot.includes("Stories are written by AI from official releases and may contain mistakes; each one links to its original."), `${label}: the footer says stories are written by AI and link to their originals`);
+      ok(foot.includes("Outage figures from Nova Scotia Power."), `${label}: the footer credits Nova Scotia Power for outage figures`);
       await p.close();
     }
 
