@@ -15,7 +15,7 @@
       "public/chat.js",
       "docs/DESIGN-SYSTEM.md"
     ],
-    "deny": ["public/views/home.js"]
+    "deny": ["public/views/home.js", "public/views/notices.js"]
   },
   "bash": [
     ["npm", "test"],
