@@ -19,6 +19,11 @@ You receive the scope and acceptance criteria from Nadia Fraser.
    covered by a new browser check is flagged to Nadia Fraser, because `test/e2e/` is protected.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
    `npx wrangler d1 migrations apply talkhalifax --local`, and `npx wrangler dev` to exercise the change.
+   - `npm run test:hooks`: the agent guard's own tests, which CI runs.
+   - For a change people can see, `node test/e2e/look.mjs <route> ...` with plain-word routes (`root`, `home`,
+     `notices`, `events`, `article-<id>`), adding `--dark` or `--mid` when they matter. It runs the site locally on
+     test data and saves phone and desktop screenshots, with and without reduced motion, to `.agent-tmp/look/`.
+     Read each one and report what it shows. Run the command exactly as written, with nothing set in front of it.
    - `node --check` on every client `.js` file the change touches, if any.
 4. `git add` each file you changed, by name, then `git commit -m "<message>"`, ending the message with the
    Co-Authored-By line given in the session.
