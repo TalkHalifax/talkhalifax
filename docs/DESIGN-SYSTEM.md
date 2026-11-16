@@ -84,7 +84,7 @@ text sizes must already be readable: 16px body minimum on inputs to stop iOS zoo
 | Offline bar | `.offline-bar` | Sticky caution band under the header while there's no connection |
 | Weather line | `.wx` | 24px line icon (`--ink`) and 13px muted text, left of the sections on desktop; the "Feels like" words drop under 960px; at the bottom of the menu on phones. A link to Environment Canada, with the full reading in its label |
 | Install card | `.install` dialog | Opened by Install the app where the browser has no install prompt (iPhone and iPad always). Numbered steps with the Share or ⋮ icon drawn inline; tap outside or × to close |
-| Global footer | `.site-foot` | Anchored to the bottom (the body is a full-height column and `main` grows), on every view (hidden under the full-screen Transit map on phones) on the sunken surface. The brand row (app icon, wordmark, one line) sits beside three columns: Read (every section), Stay in the loop (Get alerts; Install the app, on phones and wherever the browser offers its install prompt, hidden inside the installed app; profile; privacy) and Our sources (official sites, ↗ external). The fine print sits under a hairline. Four columns on desktop; two under 860px, with sources full width under 560px. Clears the docked chat |
+| Global footer | `.site-foot` | Anchored to the bottom (the body is a full-height column and `main` grows), on every view (hidden under the full-screen Transit map on phones) on the sunken surface. The brand row (app icon, wordmark, one line) sits beside three columns: Read (every section), Stay in the loop (Get alerts; Install the app, on phones and wherever the browser offers its install prompt, hidden inside the installed app; profile; privacy) and Our sources (official sites, ↗ external). The fine print sits under a hairline and ends with the site version (`v<PR number>` live, `dev` locally) in mono at 12px, `--ink-muted`. Four columns on desktop; two under 860px, with sources full width under 560px. Clears the docked chat |
 | App icon | `public/icons/` | A Halifax skyline (lighthouse, the Macdonald Bridge, City Hall's clock tower, the Dominion Building, a church spire, towers behind) over the harbour, navy on pale blue, no words. Rounded for `any`; full-bleed with the skyline inside the 80% safe zone for `maskable`; square for Apple's touch icon; the 32 px favicon is cropped to the bridge and clock tower |
 | Drawer | `.drawer`, `.dr-*` | Phone navigation and account, a native `<dialog>` |
 | Story card | `.card` (`.lead` spans 2) | Glass; kicker, headline, dek, pills, live viewer count |
@@ -103,6 +103,15 @@ text sizes must already be readable: 16px body minimum on inputs to stop iOS zoo
 | Moderation | `.report`, `.mod-tools`, `.rep-done`, `.reset-link` | Moderators only |
 | Legal | `.legal` | Privacy page reading width |
 | Admin site | `public/admin.css` in the admin repo | Its own small stylesheet on the same tokens: a centred sign-in card (`.signin`), side menu with Sign out that stacks on phones, glass cards, wide lists that scroll inside their card. Charts use `--ink` only, one measure per plot with a shared zero baseline; hover shows the exact value and every chart can show as a table |
+
+### Site version
+
+The footer's `v<N>` and the service worker's build name are stamped at deploy:
+
+- The stamp runs in the deploy job only, after checkout and before `wrangler deploy`, never in `check`, and it's never committed.
+- The value is `v<N>` (`^v[0-9]+$`). N comes from the merge commit subject "Merge pull request #N" (or a squash subject ending "(#N)").
+- It replaces `<span class="sf-ver" id="sfVer">dev</span>` in `public/index.html`, and `const BUILD = "dev";` in `public/sw.js`, with `v<N>`. Each string must occur exactly once, otherwise the step fails.
+- Unstamped is `dev`. Saved stories live in the fixed `th-v7-data` cache, which never follows the version. The `th-vN` base is still bumped by hand when the cache layout changes.
 
 ## Voice in the interface
 

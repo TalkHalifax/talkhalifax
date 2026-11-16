@@ -321,6 +321,7 @@ body.chat-open #article.wide { padding-right: calc(var(--chatw) + max(28px, env(
 .sf-fine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
 .sf-fine p { margin: 0; max-width: 72ch; }
 .sf-fine a { color: var(--ink); }
+.sf-fine .sf-ver { font-family: var(--f-mono); font-size: 12px; }
 /* Keep clear of the docked chat: beside it on desktop, above its bar on phones */
 body.chat-open .site-foot .wrap { padding-right: calc(var(--chatw) + max(28px, env(safe-area-inset-right, 0px))); }
 @media (max-width: 960px) {
