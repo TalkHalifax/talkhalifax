@@ -1,6 +1,7 @@
 // Web Push alerts as they work today: subscribing, the kinds and quiet hours readers choose, the rate limit, which
 // notice falls under which kind, and sending (encryption, VAPID, and what happens to a subscription a push service
-// refuses). No test reaches the network: fetch is stubbed, and only push.example.test answers.
+// refuses). No test reaches the network: fetch is stubbed, and only push.example.test and push-b.example.test (reserved
+// .test names, two push services) answer; anything else is counted as stray and fails the test.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Env } from "../../src/env";
 import { alertKind, countRecipients, MAX_SEND, pushApi, sendNotice, sweepSubscriptions } from "../../src/push";
@@ -12,6 +13,7 @@ declare global {
 
 const ORIGIN = "https://site.test";
 const PUSH_HOST = "push.example.test";
+const PUSH_HOST_B = "push-b.example.test";
 const BAD_ADDRESS = { error: "That browser's alert address wasn't recognised." };
 const DEFAULT_KINDS = ["weather", "outages", "safety", "other"];
 
@@ -58,7 +60,7 @@ beforeEach(async () => {
     const url = String(input instanceof Request ? input.url : input);
     let host = "";
     try { host = new URL(url).hostname; } catch { /* counted as stray below */ }
-    if (host !== PUSH_HOST) { stray.push(url); throw new Error("No network in tests"); }
+    if (host !== PUSH_HOST && host !== PUSH_HOST_B) { stray.push(url); throw new Error("No network in tests"); }
     sent.push({ url, init });
     const r = replies.get(url) ?? 201;
     if (r === "throw") throw new Error("connection reset");
@@ -108,10 +110,11 @@ const subscribe = (endpoint: string, extra: Record<string, unknown> = {}, o: Cal
 const row = (endpoint: string) => env.DB.prepare("SELECT * FROM push_subs WHERE endpoint = ?").bind(endpoint).first<Record<string, any>>();
 const rowCount = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM push_subs").first<{ n: number }>())!.n;
 
-/** A subscriber put straight in the table, on the stubbed push service, with real keys so its alerts can be decrypted. */
-async function addSub(n: number, kinds: string[] | string = ["weather"], cols: { quiet_start?: number | null; quiet_end?: number | null; failures?: number } = {}) {
+/** A subscriber put straight in the table, on a stubbed push service (PUSH_HOST unless the test names another), with
+ *  real keys so its alerts can be decrypted. Endpoints differ by n, so give each subscriber its own n across hosts. */
+async function addSub(n: number, kinds: string[] | string = ["weather"], cols: { quiet_start?: number | null; quiet_end?: number | null; failures?: number } = {}, host = PUSH_HOST) {
   const b = await browser();
-  const endpoint = keep(`https://${PUSH_HOST}/sub/${n}`);
+  const endpoint = keep(`https://${host}/sub/${n}`);
   await env.DB.prepare("INSERT INTO push_subs (endpoint, p256dh, auth, kinds, quiet_start, quiet_end, created_at, updated_at, failures) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)")
     .bind(endpoint, b.p256dh, b.auth, typeof kinds === "string" ? kinds : JSON.stringify(kinds), cols.quiet_start ?? null, cols.quiet_end ?? null, cols.failures ?? 0).run();
   return { endpoint, ...b };
@@ -563,6 +566,73 @@ describe("dead subscriptions don't linger (NOT-1 D2)", () => {
     await addSub(1);
     expect(await sendNotice(envOn, id)).toEqual({ sent: 0, failed: 0, removed: 0, error: "This notice is too long to send as an alert." });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("a refusal is judged against its own push service (NOT-1 N2)", () => {
+  const notice = { kind: "notice", section: "Weather", headline: "Gale warning for Halifax", dek: "Winds gusting to 90 km/h tonight." };
+  /** A subscriber with last_sent_at n*1000, so recipients() puts them in n order, answering `answer`. */
+  const sub = async (n: number, answer: number | "throw", host = PUSH_HOST) => {
+    const s = await addSub(n, ["weather"], {}, host);
+    await env.DB.prepare("UPDATE push_subs SET last_sent_at = ? WHERE endpoint = ?").bind(n * 1000, s.endpoint).run();
+    replies.set(s.endpoint, answer);
+    return s;
+  };
+  /** A subscriber with an endpoint as given, which may not be one checkSub would accept. */
+  const put = async (endpoint: string, answer: number | "throw") => {
+    const b = await browser();
+    await env.DB.prepare("INSERT INTO push_subs (endpoint, p256dh, auth, kinds, created_at, updated_at) VALUES (?, ?, ?, '[\"weather\"]', 1, 1)")
+      .bind(keep(endpoint), b.p256dh, b.auth).run();
+    replies.set(endpoint, answer);
+  };
+
+  it("every delivery at one push service refused with 403, while another's get through, deletes no one at the first", async () => {
+    at("2026-01-15T17:00:00Z");
+    await makeStory("weather-gale", notice);
+    const refused = [await sub(1, 403), await sub(2, 403), await sub(3, 403)];
+    const through = await sub(4, 201, PUSH_HOST_B);
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 1, failed: 3, removed: 0 });
+    for (const [i, s] of refused.entries()) expect(await row(s.endpoint)).toMatchObject({ failures: 1, last_sent_at: (i + 1) * 1000 });
+    expect(await row(through.endpoint)).toMatchObject({ failures: 0, last_sent_at: Date.parse("2026-01-15T17:00:00Z") });
+  });
+
+  it.each([
+    [400, "an earlier"], [403, "an earlier"], [413, "an earlier"],
+    [400, "a later"], [403, "a later"], [413, "a later"],
+  ] as const)("a %i is removed when the same push service took a delivery in %s group of ten", async (code, when) => {
+    await makeStory("weather-gale", notice);
+    // Eleven at one push service, sent ten then one: the success and the refusal sit in different groups, with
+    // ordinary failures between them
+    const subs = [];
+    for (let n = 1; n <= 11; n++) subs.push(await sub(n, n === 1 ? (when === "an earlier" ? 201 : code) : n === 11 ? (when === "an earlier" ? code : 201) : 500));
+    const refusedSub = when === "an earlier" ? subs[10] : subs[0];
+    const okSub = when === "an earlier" ? subs[0] : subs[10];
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 1, failed: 9, removed: 1 });
+    expect(sent.slice(10).map(s => s.url)).toEqual([subs[10].endpoint]); // the eleventh went out on its own, after the ten
+    expect(await row(refusedSub.endpoint)).toBeNull();
+    expect(await row(okSub.endpoint)).toMatchObject({ failures: 0 });
+    for (const s of subs.slice(1, 10)) expect(await row(s.endpoint)).toMatchObject({ failures: 1 });
+  });
+
+  it("a success at an opaque origin counts for no push service", async () => {
+    await makeStory("weather-gale", notice);
+    // Not a special scheme, so the URL's origin is "null"; the stub still answers for its host
+    const ok = `foo://${PUSH_HOST}/opaque/1`, refused = `foo://${PUSH_HOST}/opaque/2`;
+    expect(new URL(ok).origin).toBe("null");
+    await put(ok, 201);
+    await put(refused, 403);
+    expect(await sendNotice(envOn, "weather-gale")).toMatchObject({ sent: 1, failed: 1, removed: 0 });
+    expect(await row(refused)).toMatchObject({ failures: 1 });
+  });
+
+  it("an endpoint that isn't a URL counts as a failure and doesn't stop the send", async () => {
+    await makeStory("weather-gale", notice);
+    await put("not a url", 403);
+    const s = await sub(1, 201);
+    const r = await sendNotice(envOn, "weather-gale").catch((e: Error) => e);
+    expect(r).toMatchObject({ sent: 1, failed: 1, removed: 0 });
+    expect(sent.map(f => f.url)).toEqual([s.endpoint]);
+    expect(await row("not a url")).toMatchObject({ failures: 1 });
   });
 });
 

@@ -135,16 +135,21 @@ export async function sendNotice(env: Env, id: string, opts: { cap?: number } = 
     const now = Date.now();
     for (const [sub, r] of batch) results.push([sub, r, now]);
   }
-  // A 400, 403 or 413 removes a subscription only if some other delivery in this send got through. 413 is about our
-  // payload, the same for everyone, and 400 or 403 is also what a bad VAPID key or token gets: if every delivery is
-  // refused, the fault is likely ours, so those count as ordinary failures rather than wiping every subscriber.
-  const anyOk = results.some(([, r]) => r === "ok");
+  // A 400, 403 or 413 removes a subscription only if some other delivery in this send, to the same push service (the
+  // endpoint's origin), got through. 413 is about our payload, the same for everyone, and 400 or 403 is also what a bad
+  // VAPID key or token gets, or a push service that's having trouble: if every delivery to a service is refused, the
+  // fault is likely ours or its, so those count as ordinary failures rather than wiping every subscriber there. An
+  // endpoint that won't parse, or has an opaque origin, never counts as a success at any service.
+  const originOf = (endpoint: string) => { try { const o = new URL(endpoint).origin; return o === "null" ? null : o; } catch { return null; } };
+  const okOrigins = new Set<string>();
+  for (const [sub, r] of results) { const o = r === "ok" ? originOf(sub.endpoint) : null; if (o) okOrigins.add(o); }
+  const okHere = (sub: Sub) => { const o = originOf(sub.endpoint); return o !== null && okOrigins.has(o); };
   let sent = 0, failed = 0, removed = 0;
   // Every write goes in one batch at the end: one subrequest, and all or nothing
   const writes: D1PreparedStatement[] = [];
   for (const [sub, r, now] of results) {
     if (r === "ok") { sent++; writes.push(env.DB.prepare("UPDATE push_subs SET last_sent_at = ?, failures = 0 WHERE endpoint = ?").bind(now, sub.endpoint)); }
-    else if (r === "gone" || (r === "refused" && anyOk)) { removed++; writes.push(env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint)); }
+    else if (r === "gone" || (r === "refused" && okHere(sub))) { removed++; writes.push(env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?").bind(sub.endpoint)); }
     else { failed++; writes.push(env.DB.prepare("UPDATE push_subs SET failures = failures + 1 WHERE endpoint = ?").bind(sub.endpoint)); }
   }
   writes.push(env.DB.prepare("DELETE FROM push_subs WHERE failures >= ?").bind(MAX_FAILURES));
