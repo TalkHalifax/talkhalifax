@@ -1,0 +1,20 @@
+{
+  "agent": "agent-ops-reviewer",
+  "tools": ["Read", "Glob", "Grep", "Bash"],
+  "edit": {
+    "allow": [],
+    "deny": []
+  },
+  "bash": [
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "diff", "--", "agent-drafts"],
+    ["git", "log", "--oneline", "-20"],
+    ["git", "checkout", "-b", "re:^agent-ops/[a-z0-9._-]+$"],
+    ["git", "add", "agent-drafts"],
+    ["git", "commit", "-m", "*"],
+    ["npm", "test"],
+    ["git", "push", "-u", "origin", "re:^agent-ops/[a-z0-9._-]+$"],
+    ["gh", "pr", "create", "--base", "main", "--head", "re:^agent-ops/[a-z0-9._-]+$", "--title", "*", "--body", "*"]
+  ]
+}
