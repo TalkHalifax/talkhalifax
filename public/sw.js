@@ -91,3 +91,47 @@ self.addEventListener("notificationclick", e => {
     return self.clients.openWindow(target);
   })());
 });
+
+// The browser replaced or dropped this alert subscription: carry the reader's choices over to a new one and remove the
+// old address. Each step stands alone, so one failure doesn't skip the steps after it.
+const pushKeyBytes = k => Uint8Array.from(atob(k.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((k.length + 3) % 4)), c => c.charCodeAt(0));
+const postJson = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+self.addEventListener("pushsubscriptionchange", e => {
+  e.waitUntil((async () => {
+    const old = e.oldSubscription || null;
+    let sub = e.newSubscription || null;
+    // 1. A new subscription, if the browser didn't hand one over
+    if (!sub) {
+      try {
+        let key = old?.options?.applicationServerKey || null;
+        if (!key) {
+          const r = await fetch("/api/push");
+          const d = r.ok ? await r.json() : null;
+          if (d && d.enabled === true && d.publicKey != null) key = pushKeyBytes(d.publicKey);
+        }
+        if (key) sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      } catch (err) { sub = null; }
+    }
+    // 2. The choices saved for the old address
+    let status = null;
+    if (old) {
+      try {
+        const r = await postJson("/api/push/status", { endpoint: old.endpoint });
+        if (r.ok) status = await r.json();
+      } catch (err) { status = null; }
+    }
+    // 3. Save the new address, with those choices or the defaults
+    if (sub) {
+      try {
+        const body = { subscription: sub.toJSON(), quiet: null };
+        if (status && status.subscribed === true) { body.kinds = status.kinds; body.quiet = status.quiet; }
+        await postJson("/api/push/subscribe", body);
+      } catch (err) { /* nothing more to do */ }
+    }
+    // 4. Remove the old address, unless it's the one just saved
+    if (old && !(sub && sub.endpoint === old.endpoint)) {
+      try { await postJson("/api/push/unsubscribe", { endpoint: old.endpoint }); } catch (err) { /* nothing more to do */ }
+    }
+  })().catch(() => {}));
+});
