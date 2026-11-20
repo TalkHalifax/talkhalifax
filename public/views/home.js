@@ -93,13 +93,14 @@ function railWatches() {
   return `<h3>Weather watches and statements</h3><div class="feed">${rows}</div>`;
 }
 
-/** The latest city notices: the bar's urgent ones first (unless RAIL_REPEATS_BAR is off), then the rest, newest first. */
+/** City notices, newest first (Home rule 1): when any is urgent, only the urgent ones, replacing the latest; when none is,
+ *  the latest. With RAIL_REPEATS_BAR off, the bar's urgent ones are left out and the latest of the rest are shown. */
 function railNotices() {
   if (!S.stories) return "";
   const urgent = urgentNotices();
   const ids = new Set(urgent.map(n => n.id));
   const rest = S.stories.filter(n => n.kind === "notice" && !ids.has(n.id)).sort(byPublished);
-  const picked = [...(RAIL_REPEATS_BAR ? urgent : []), ...rest].slice(0, RAIL_NOTICES);
+  const picked = (RAIL_REPEATS_BAR && urgent.length ? urgent : rest).slice(0, RAIL_NOTICES);
   if (!picked.length) return "";
   const rows = picked.map(n => `<a class="feed-row" href="#article-${esc(n.id)}" data-article="${esc(n.id)}"><span class="pill">${esc(noticeLabel(n))}</span><span class="tt">${esc(n.headline)}</span><time class="stamp"${dt(n.publishedAt)}>${esc(when(n.publishedAt))}</time></a>`).join("");
   return `<h3>Notices</h3><div class="feed">${rows}</div><a class="more" href="#notices" data-go="notices">All notices</a>`;
