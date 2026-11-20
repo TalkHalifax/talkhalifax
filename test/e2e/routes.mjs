@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
+import { checkSwPush } from "./sw-push.mjs";
 
 const PORT = 8791, B = `http://localhost:${PORT}`;
 const DATA = ".wrangler/e2e";
@@ -88,6 +89,7 @@ const ok = (c, label, extra = "") => { console.log(`${c ? "PASS" : "FAIL"} ${lab
   const sw = occurs("public/sw.js", 'const BUILD = "dev";');
   ok(sw === 1, "public/sw.js has the service worker's version placeholder exactly once", `found ${sw}`);
 }
+await checkSwPush(ok);
 
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
