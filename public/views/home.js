@@ -1,4 +1,4 @@
-import { $, esc, hm, shortDate, ago, S, tms, loadingMsg, reducedMotion } from "../app.js";
+import { $, esc, fmt, hm, shortDate, fullDate, S, tms, loadingMsg, reducedMotion } from "../app.js";
 import { noticeType, noticeSeverity } from "./notices.js";
 
 const VIEWER_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path d="M3.8 21c.9-4.2 4.2-6.6 8.2-6.6s7.3 2.4 8.2 6.6z" fill="currentColor"/></svg>';
@@ -63,28 +63,58 @@ function setCards(box, html) {
   }
 }
 
-/** Home is the developing stories, the most recently updated first. */
+const FEED_MAX = 24;
+const year = t => fmt({ year: "numeric" }).format(new Date(t));
+/** A card timestamp in Halifax time: "Nov 20, 3:15 pm", with the year when it isn't this one. */
+const when = t => (year(t) === year(Date.now()) ? shortDate(t) : fullDate(t)) + ", " + hm(t);
+
+/** Home is the developing stories pinned first, then the settled articles as a feed, each the most recently updated first. */
 function renderHome() {
   renderBanners(); // city notices live in the banners now
   if (!S.stories) { setCards($("#devCards"), loadingMsg()); return; }
   const t = tms;
+  const offline = !navigator.onLine;
   const updated = x => Math.max(t(x.lastUpdate), t(x.developingSince), t(x.publishedAt));
-  const dev = S.stories.filter(x => x.kind === "article" && x.stage === "developing").sort((a, b) => updated(b) - updated(a));
-  const devCards = dev.map((x, i) => {
-    const r = x.room;
-    const recentUpdate = x.lastUpdate && Date.now() - t(x.lastUpdate) < 864e5;
-    const left = recentUpdate ? `<span class="upd">Updated ${hm(x.lastUpdate)}</span>`
-      : r.lastAt ? `<span>Last message ${ago(r.lastAt)}${r.lastAuthor ? " from " + esc(r.lastAuthor) : ""}</span>`
-      : `<span>${shortDate(x.publishedAt)}</span>`;
-    // Live viewer count: everyone with the story open right now, chatting or not
-    const viewers = `<span class="viewers${r.here ? " on" : ""}" aria-label="${r.here} ${r.here === 1 ? "person" : "people"} here now">${VIEWER_SVG}<b>${r.here}</b></span>`;
-    return `<button type="button" class="card glass${i === 0 ? " lead" : ""}" data-article="${esc(x.id)}">
-      <span class="k">${esc(x.area || x.section || "Halifax")}</span>
+  const newest = (a, b) => updated(b) - updated(a);
+  const arts = S.stories.filter(x => x.kind === "article");
+  const pins = arts.filter(x => x.stage === "developing").sort(newest);
+  const feed = arts.filter(x => x.stage === "archived").sort(newest).slice(0, FEED_MAX);
+  const kicker = x => (x.area || x.section ? `<span class="k">${esc(x.area || x.section)}</span>` : "");
+  const head = x => `${kicker(x)}
       <span class="tt">${esc(x.headline)}</span>
-      ${x.dek ? `<span class="dk">${esc(x.dek)}</span>` : ""}
-      <span class="ft">${left}${viewers}</span></button>`;
+      ${x.dek ? `<span class="dk">${esc(x.dek)}</span>` : ""}`;
+  const messages = r => {
+    const n = Number(r && r.messages) || 0;
+    return `<span class="pill${n ? "" : " zero"}">${n} ${n === 1 ? "message" : "messages"}${offline ? ", last seen" : ""}</span>`;
+  };
+  const stamp = x => (x.lastUpdate ? "Updated " + when(x.lastUpdate) : "Published " + when(x.publishedAt));
+  const pinCards = pins.map((x, i) => {
+    const r = x.room || {};
+    const recentUpdate = x.lastUpdate && Date.now() - t(x.lastUpdate) < 864e5;
+    const left = `<span${recentUpdate ? ' class="upd"' : ""}>${esc(stamp(x))}</span>`;
+    // A version 1 story has never changed, whatever its last-written time says (as in article.js)
+    const note = x.version > 1 && x.lastUpdate && x.updateNote
+      ? `<span class="dk"><span class="upd">Latest update</span> · ${esc(x.updateNote)}</span>` : "";
+    // Viewer count: everyone with the story open, live when online, the last count we saw when offline
+    const here = Number(r.here) || 0, who = here === 1 ? "person" : "people";
+    const viewers = offline
+      ? `<span class="viewers" aria-label="${here} ${who} here when last seen">${VIEWER_SVG}<b>${here}</b> last seen</span>`
+      : `<span class="viewers${here ? " on" : ""}" aria-label="${here} ${who} here now">${VIEWER_SVG}<b>${here}</b></span>`;
+    return `<button type="button" class="card glass${i === 0 ? " lead" : ""}" data-article="${esc(x.id)}">
+      ${head(x)}
+      ${note}
+      <span class="ft">${left}<span style="display:inline-flex;align-items:center;gap:10px">${messages(r)}${viewers}</span></span></button>`;
   }).join("");
-  setCards($("#devCards"), devCards || '<div class="msg">Nothing developing right now. New stories appear here as the newsroom publishes them, and settled ones are in <a href="#articles" data-go="articles">Articles</a>.</div>');
+  const feedCards = feed.map(x => `<button type="button" class="card glass archived" data-article="${esc(x.id)}">
+      ${head(x)}
+      <span class="ft"><span>${esc(stamp(x))}</span>${messages(x.room)}</span></button>`).join("");
+  const html = pinCards ? pinCards + feedCards
+    : feedCards ? '<div class="msg">Nothing developing right now.</div>' + feedCards
+    : '<div class="msg">Nothing developing right now. New stories appear here as the newsroom publishes them, and settled ones are in <a href="#articles" data-go="articles">Articles</a>.</div>';
+  setCards($("#devCards"), html);
 }
+
+// Switch the viewer counts between "here now" and "last seen" as the connection comes and goes
+for (const ev of ["offline", "online"]) window.addEventListener(ev, () => { if (S.current === "home") renderHome(); });
 
 export { renderBanners, renderHome };
