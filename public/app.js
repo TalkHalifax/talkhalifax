@@ -146,6 +146,7 @@ function renderHeaderWeather() {
 async function loadWeather() {
   try { S.weather = (await getJSON("/api/weather")).weather; } catch (e) {}
   renderHeaderWeather();
+  if (S.current === "home") renderBanners();
 }
 
 function renderDrawer() {
