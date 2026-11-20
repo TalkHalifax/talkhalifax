@@ -92,28 +92,32 @@ self.addEventListener("notificationclick", e => {
   })());
 });
 
-// The browser replaced or dropped this alert subscription: carry the reader's choices over to a new one and remove the
-// old address. Each step stands alone, so one failure doesn't skip the steps after it.
+// The browser replaced or dropped this alert subscription. Only while alerts are on: carry the reader's own saved
+// choices over to a new address and remove the old one. A new address is kept only if it's saved with those choices;
+// otherwise it's dropped, so nobody is signed up for alerts they didn't choose. Each step stands alone, so one failure
+// doesn't skip the steps after it.
 const pushKeyBytes = k => Uint8Array.from(atob(k.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((k.length + 3) % 4)), c => c.charCodeAt(0));
 const postJson = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 self.addEventListener("pushsubscriptionchange", e => {
   e.waitUntil((async () => {
+    // 1. Alerts must be on; otherwise do nothing at all
+    let publicKey = null;
+    try {
+      const r = await fetch("/api/push");
+      const d = r.ok ? await r.json() : null;
+      if (d && d.enabled === true && d.publicKey != null) publicKey = d.publicKey;
+    } catch (err) { publicKey = null; }
+    if (publicKey == null) return;
     const old = e.oldSubscription || null;
+    // 2. A new subscription: the browser's, or one made with the site's current key
     let sub = e.newSubscription || null;
-    // 1. A new subscription, if the browser didn't hand one over
     if (!sub) {
       try {
-        let key = old?.options?.applicationServerKey || null;
-        if (!key) {
-          const r = await fetch("/api/push");
-          const d = r.ok ? await r.json() : null;
-          if (d && d.enabled === true && d.publicKey != null) key = pushKeyBytes(d.publicKey);
-        }
-        if (key) sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKeyBytes(publicKey) });
       } catch (err) { sub = null; }
     }
-    // 2. The choices saved for the old address
+    // 3. The choices saved for the old address
     let status = null;
     if (old) {
       try {
@@ -121,15 +125,20 @@ self.addEventListener("pushsubscriptionchange", e => {
         if (r.ok) status = await r.json();
       } catch (err) { status = null; }
     }
-    // 3. Save the new address, with those choices or the defaults
+    // 4. Save the new address with those choices; with no choices to carry over, or if saving fails, drop it
     if (sub) {
-      try {
-        const body = { subscription: sub.toJSON(), quiet: null };
-        if (status && status.subscribed === true) { body.kinds = status.kinds; body.quiet = status.quiet; }
-        await postJson("/api/push/subscribe", body);
-      } catch (err) { /* nothing more to do */ }
+      let saved = false;
+      if (status && status.subscribed === true) {
+        try {
+          const r = await postJson("/api/push/subscribe", { subscription: sub.toJSON(), kinds: status.kinds, quiet: status.quiet });
+          saved = r.ok;
+        } catch (err) { saved = false; }
+      }
+      if (!saved) {
+        try { await sub.unsubscribe().catch(() => {}); } catch (err) { /* nothing more to do */ }
+      }
     }
-    // 4. Remove the old address, unless it's the one just saved
+    // 5. Remove the old address, unless it's the same as the new one
     if (old && !(sub && sub.endpoint === old.endpoint)) {
       try { await postJson("/api/push/unsubscribe", { endpoint: old.endpoint }); } catch (err) { /* nothing more to do */ }
     }
