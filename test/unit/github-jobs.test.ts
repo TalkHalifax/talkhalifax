@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGithubJobs } from "../../src/github-jobs";
 import worker from "../../src/index";
+import { SWEEP_AFTER_DAYS } from "../../src/push";
 import { CRON_JOBS } from "../../src/routes/cron-jobs";
 import { env, HOUR, DAY } from "./helpers";
 
@@ -61,10 +62,72 @@ describe("starting the GitHub jobs", () => {
 });
 
 describe("the cron's job list", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  const health = async () => JSON.parse((await env.DB.prepare("SELECT body FROM feeds WHERE name = 'cron-health'").first<{ body: string }>())!.body) as Record<string, number>;
+  const sweptAt = async () => (await env.DB.prepare("SELECT updated_at FROM feeds WHERE name = 'push-sweep'").first<{ updated_at: string }>())?.updated_at;
 
-  it("has the seven jobs, in the order the cron has always run them", () => {
-    expect(CRON_JOBS.map(j => j.key)).toEqual(["weather", "alerts", "events", "stages", "transit schedule", "GitHub jobs", "clean-up"]);
+  it("has the eight jobs, in the order the cron has always run them, with the alert address clean-up last", () => {
+    expect(CRON_JOBS.map(j => j.key)).toEqual(["weather", "alerts", "events", "stages", "transit schedule", "GitHub jobs", "clean-up", "push sweep"]);
+  });
+  it("lists the alert address clean-up for the admin site", () => {
+    const job = CRON_JOBS.find(j => j.key === "push sweep")!;
+    expect(job.name).toBe("Alert address clean-up");
+    expect(job.every).toBe("Daily (checked every 30 minutes)");
+    expect(job.does).toBe("Deletes alert addresses with no alert reaching them or change in 180 days, or after five failed alerts");
+    expect(job.does).toContain(`${SWEEP_AFTER_DAYS} days`);
+  });
+  it("runs the alert address clean-up: one cron run records the sweep and counts no failure", async () => {
+    vi.stubGlobal("fetch", async () => { throw new Error("no network in this test"); });
+    expect(await sweptAt()).toBeUndefined();
+    await worker.scheduled({} as ScheduledController, env);
+    expect(await sweptAt()).toBeTypeOf("string");
+    expect((await health())["push sweep"]).toBe(0);
+  });
+  it("sweeps alert addresses at most once a day, and counts a skipped run as a success", async () => {
+    vi.stubGlobal("fetch", async () => { throw new Error("no network in this test"); });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(START);
+    await worker.scheduled({} as ScheduledController, env);
+    expect(await sweptAt()).toBe("2026-11-07T12:00:00Z");
+    vi.setSystemTime(START + 23 * HOUR);
+    await worker.scheduled({} as ScheduledController, env);
+    expect((await health())["push sweep"]).toBe(0);
+    expect(await sweptAt()).toBe("2026-11-07T12:00:00Z");
+  });
+  it("counts each failed sweep under its key, without touching the other database jobs", async () => {
+    vi.stubGlobal("fetch", async () => { throw new Error("no network in this test"); });
+    // The database refuses only the sweep's batch (the one touching push_subs); every other statement goes through
+    const db = env.DB, sqlOf = new WeakMap<object, string>(), real = new WeakMap<object, D1PreparedStatement>();
+    const prepare = (sql: string) => {
+      const s = db.prepare(sql);
+      const p = new Proxy(s, {
+        get(t, k) {
+          if (k === "bind") return (...args: unknown[]) => { const b = t.bind(...args); sqlOf.set(b, sql); return b; };
+          const v = Reflect.get(t, k, t);
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      sqlOf.set(p, sql); real.set(p, s);
+      return p;
+    };
+    const batch = (stmts: D1PreparedStatement[]) => stmts.some(s => /push_subs/.test(sqlOf.get(s) ?? ""))
+      ? Promise.reject(new Error("D1_ERROR: database is unavailable"))
+      : db.batch(stmts.map(s => real.get(s) ?? s));
+    const broken = new Proxy(db, {
+      get(t, k) {
+        if (k === "prepare") return prepare;
+        if (k === "batch") return batch;
+        const v = Reflect.get(t, k, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    const brokenEnv = { ...env, DB: broken } as typeof env;
+    await worker.scheduled({} as ScheduledController, brokenEnv);
+    await worker.scheduled({} as ScheduledController, brokenEnv);
+    const fails = await health();
+    expect(fails["push sweep"]).toBe(2);
+    expect(fails).toMatchObject({ stages: 0, "GitHub jobs": 0, "clean-up": 0 });
+    expect(await sweptAt()).toBeUndefined();
   });
   it("is what the cron runs, and each job's failures are counted under its key", async () => {
     vi.stubGlobal("fetch", async () => { throw new Error("no network in this test"); });
@@ -73,7 +136,7 @@ describe("the cron's job list", () => {
     const fails = JSON.parse(row!.body) as Record<string, number>;
     expect(Object.keys(fails)).toEqual(CRON_JOBS.map(j => j.key));
     // Weather and warnings need the network, and no library events have arrived; the rest can't fail here
-    expect(fails).toMatchObject({ weather: 1, alerts: 1, events: 1, stages: 0, "GitHub jobs": 0, "clean-up": 0 });
+    expect(fails).toMatchObject({ weather: 1, alerts: 1, events: 1, stages: 0, "GitHub jobs": 0, "clean-up": 0, "push sweep": 0 });
     expect([0, 1]).toContain(fails["transit schedule"]); // fails only in the last week of the map's schedule
   });
 });

@@ -99,7 +99,7 @@
       <li><b>Anonymous counts.</b> We count how many people have the site open, and how often each story is shown in a list and opened. Your browser sends a random number made when the page loads, so one page isn't counted twice. It isn't saved in your browser or tied to you or your account, and it's forgotten within about 10 minutes. Only totals are kept from these counts: per story for up to 400 days, and for people online up to 90 days.</li>
       <li><b>Your connection's IP address.</b> We use it to slow down mass sign-ups, guessing at password reset links and repeated changes to, or checks of, alert settings, in counters that are deleted after about a day. Sign-up also sends it to Cloudflare's bot check. We also use it to limit how many anonymous counts one connection can send, and how many sign-in attempts the editor's admin page takes, in short-lived counters at Cloudflare that we don't store.</li>
       <li><b>Request logs.</b> Separately, we've turned on Cloudflare's request logs. They record each request to the site, including the address asked for, your IP address, your browser type and language, and your approximate location worked out from the IP address, such as your city, postal code and map coordinates. The address can show which stories you opened or that you changed or checked your alerts, or that your browser renewed them. If you're signed in and join a story's chat, the logs connect your account ID to that chat, your IP address and your location, so they aren't anonymous. They don't record what you post, your password or your session cookie. They're kept for up to 7 days, for security and to fix problems.</li>
-      <li><b>If you turn on alerts</b>, your browser's alert address (a link to its push service, such as Google's, Apple's or Mozilla's), the keys that let us encrypt alerts to it, and the kinds of alert and quiet hours you picked. Nothing stored with them ties them to your name or account, though the request logs show alert changes and checks beside your IP address.</li>
+      <li><b>If you turn on alerts</b>, your browser's alert address (a link to its push service, such as Google's, Apple's or Mozilla's), the keys that let us encrypt alerts to it, and the kinds of alert and quiet hours you picked, when you set them up and last changed them, when an alert last reached the address, and how many alerts in a row failed. Nothing stored with them ties them to your name or account, though the request logs show alert changes and checks beside your IP address.</li>
       <li>Settings, like whether the chat starts open or your event filters, stay in your own browser. So do the stories you've opened, kept for offline reading.</li>
     </ul>
 
@@ -117,15 +117,16 @@
 
     <h2>How long</h2>
     <p>When a story moves to Articles, its live chat closes and its messages come down. A copy stays in our database, out of view, so moderators can act on reports, until you delete it or your account.</p>
+    <p>If you turn on alerts, your alert address, its keys, your choices and the times and count kept with them are deleted when you turn alerts off. They're also deleted when your browser's push service tells us the address is no longer valid, or turns down an alert to it because it says the address or message is invalid, while accepting the same alert for other addresses at that service; after five alerts in a row fail to reach it (saving your choices or your browser renewing it starts that count again); or at our daily clean-up once 180 days pass without an alert reaching it, you saving your choices or your browser renewing it. If we can't be reached when you turn alerts off, they're deleted the next time an alert finds the address gone, or at that clean-up.</p>
 
     <h2>Your choices</h2>
     <ul>
       <li>Delete any of your messages or comments yourself, at any time.</li>
       <li>Change your password from your profile. If you're locked out, a moderator can send you a one-time reset link.</li>
-      <li>Turn alerts off in the Alerts section of your profile (no account needed) and your alert address is deleted at once. Blocking notifications in your browser stops them too; the address is deleted once your browser's push service tells us it's no longer valid, which we find out the next time we try to send it an alert.</li>
+      <li>Turn alerts off in the Alerts section of your profile (no account needed) and your alert address is deleted at once. If we can't be reached when you turn alerts off, the address is deleted the next time an alert finds it gone, or at the clean-up below. Blocking notifications in your browser stops them too; the address is deleted once your browser's push service tells us it's no longer valid, which we find out the next time we try to send it an alert. The address is also deleted after five alerts in a row fail to reach it (saving your choices or your browser renewing it starts that count again), or at our daily clean-up once 180 days pass without an alert reaching it, you saving your choices or your browser renewing it.</li>
       <li>Delete your account from your profile. Your messages and comments are erased, your account is emptied, and you're signed out everywhere. Request logs aren't changed by this; they age out within 7 days.</li>
     </ul>
-    <p class="forum-foot">Last updated November 19, 2026.</p>
+    <p class="forum-foot">Last updated November 20, 2026.</p>
   </section>
 
 </main>
