@@ -79,6 +79,7 @@ const savedQuiet = b => !!b && !!b.quiet && b.quiet.start === QUIET.start && b.q
  */
 async function fire(ok, script, L, { answers = defaults(), old = null, neu = null, pushSubscribe }) {
   const handlers = {}, fetches = [], log = [], subscribeCalls = [], consoleCalls = [];
+  const cacheWrites = [];
   const fetchFake = (input, init) => {
     const raw = typeof input === "string" ? input : (input && typeof input.url === "string" ? input.url : String(input));
     const u = new URL(raw, `${ORIGIN}/`);
@@ -92,7 +93,7 @@ async function fire(ok, script, L, { answers = defaults(), old = null, neu = nul
     const text = JSON.stringify(a.data ?? null);
     return Promise.resolve({ ok: a.status >= 200 && a.status < 300, status: a.status, json: async () => JSON.parse(text), text: async () => text });
   };
-  const cache = { addAll: async () => {}, put: async () => {}, match: async () => undefined, keys: async () => [], delete: async () => true };
+  const cache = { addAll: async () => { cacheWrites.push("addAll"); }, put: async () => { cacheWrites.push("put"); }, match: async () => undefined, keys: async () => [], delete: async () => true };
   const sandbox = {
     fetch: fetchFake,
     location: { origin: ORIGIN, href: `${ORIGIN}/` },
@@ -139,12 +140,13 @@ async function fire(ok, script, L, { answers = defaults(), old = null, neu = nul
   }
   ok(settled === "resolved", `${L}: the waitUntil promise resolves within ${TIMEOUT / 1000} s`, settled);
 
-  const r = { fetches, log, subscribeCalls, consoleCalls };
+  const r = { fetches, log, subscribeCalls, consoleCalls, cacheWrites };
   // Checked on every case and variant: JSON POSTs, and nothing logged
   const posts = fetches.filter(f => f.method === "POST");
   ok(posts.every(f => !!f.headers && typeof f.headers === "object" && f.headers["content-type"] === "application/json"), `${L}: every POST sends content-type: application/json`, `${posts.length} POSTs`);
   ok(posts.every(f => typeof f.body === "string" && parse(f.body) !== undefined), `${L}: every POST body is a JSON string`);
   ok(consoleCalls.length === 0, `${L}: nothing is logged`, consoleCalls.map(c => `console.${c.name}`).join(", "));
+  ok(cacheWrites.length === 0, `${L}: nothing is cached`, cacheWrites.join(", "));
   const leaked = consoleCalls.flatMap(c => c.args).some(a => { const s = show(a); return MARKERS.some(m => s.includes(m)); });
   ok(!leaked, `${L}: no log carries an alert address, the public key or the subscription keys`);
   return r;
@@ -266,7 +268,30 @@ export async function checkSwPush(ok, source = readFileSync("public/sw.js", "utf
     ok(sameList(seq(r), [`GET ${P_PUSH}`, `POST ${P_STATUS}`, `POST ${P_SUB}`]), `${L}: fetches are exactly GET ${P_PUSH}, POST status, POST subscribe`, seq(r).join(", "));
     ok(bodiesTo(r, P_UNSUB).length === 0, `${L}: no unsubscribe POST`);
     ok(same.calls() === 0 && old.calls() === 0, `${L}: unsubscribe() is called 0 times`, `new ${same.calls()}, old ${old.calls()}`);
+    const [saved] = bodiesTo(r, P_SUB);
+    ok(savedKinds(saved), `${L}: the subscribe body carries the saved kinds`);
+    ok(savedQuiet(saved), `${L}: the subscribe body carries the saved quiet hours`);
   });
+
+  // 5, failed save. The new endpoint is the old one, but it isn't saved: drop it, and still remove the old address
+  for (const [variant, override, want] of [
+    ["status 500", { [P_STATUS]: { status: 500, data: { error: "Server error" } } }, [`GET ${P_PUSH}`, `POST ${P_STATUS}`, `POST ${P_UNSUB}`]],
+    ["subscribe 503", { [P_SUB]: { status: 503, data: { error: "Unavailable" } } }, [`GET ${P_PUSH}`, `POST ${P_STATUS}`, `POST ${P_SUB}`, `POST ${P_UNSUB}`]],
+  ]) {
+    await guard(ok, `case 5[${variant}]`, async () => {
+      const L = `sw push: case 5[${variant}]`;
+      const old = fakeSub(OLD, { key: oldKey() }), same = fakeSub(OLD);
+      const r = await fire(ok, script, L, { answers: { ...defaults(), ...override }, old: old.sub, neu: same.sub, pushSubscribe: neverSubscribe });
+      if (!r) return;
+      ok(sameList(seq(r), want), `${L}: fetches are exactly ${want.join(", ")}`, seq(r).join(", "));
+      const subs = bodiesTo(r, P_SUB);
+      if (variant === "status 500") ok(subs.length === 0, `${L}: no subscribe POST`, `${subs.length} subscribe POSTs`);
+      else ok(subs.length === 1, `${L}: exactly one subscribe POST (answered 503)`, `${subs.length} subscribe POSTs`);
+      ok(same.calls() === 1 && old.calls() === 0, `${L}: the new subscription's unsubscribe() is called once, the old one's 0 times`, `new ${same.calls()}, old ${old.calls()}`);
+      const removed = bodiesTo(r, P_UNSUB);
+      ok(removed.length === 1 && removed[0]?.endpoint === OLD && Object.keys(removed[0]).length === 1, `${L}: exactly one unsubscribe POST, with body {endpoint: OLD}`, `${removed.length} unsubscribe POSTs`);
+    });
+  }
 
   // 6. The server refuses to save NEW: drop it, and still remove OLD
   for (const [variant, answer] of [["subscribe 429", { status: 429, data: { error: "Too many requests" } }], ["subscribe 503", { status: 503, data: { error: "Unavailable" } }], ["subscribe rejects", REJECT]]) {
@@ -278,6 +303,7 @@ export async function checkSwPush(ok, source = readFileSync("public/sw.js", "utf
       ok(neu.calls() === 1, `${L}: NEW unsubscribe() is called once`, `called ${neu.calls()}`);
       const removed = bodiesTo(r, P_UNSUB);
       ok(removed.length === 1 && removed[0]?.endpoint === OLD, `${L}: unsubscribe {endpoint: OLD} is still POSTed`, `${removed.length} unsubscribe POSTs`);
+      ok(sameList(seq(r), [`GET ${P_PUSH}`, `POST ${P_STATUS}`, `POST ${P_SUB}`, `POST ${P_UNSUB}`]), `${L}: fetches are GET, status, subscribe, unsubscribe`, seq(r).join(", "));
     });
   }
 
