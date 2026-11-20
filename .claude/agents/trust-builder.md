@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Cesar Haas.
 
-1. `git checkout -b trust/<job>`.
+1. Your worktree is already on the job's branch, `trust/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `src/auth.ts`, `src/moderation.ts`, `src/screen.ts`,
    `test/unit/moderation.test.ts`, `test/unit/screen.test.ts`, `test/unit/reset.test.ts` and
    `test/unit/turnstile.test.ts`. Write the test for every security rule first, and confirm it fails before the fix.

@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Andrew Dyer.
 
-1. `git checkout -b site/<job>`.
+1. Your worktree is already on the job's branch, `site/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `public/app.js`, `public/index.html`, `public/sw.js`, `public/manifest.webmanifest`,
    `public/icons/**`, `public/styles.css`, `public/views/**` (except `public/views/home.js`, Home's, and `public/views/notices.js`, Notices'), `public/api.js`, `public/chat.js` and
    `docs/DESIGN-SYSTEM.md`. Follow the design system. Add a test for every new rule or page.

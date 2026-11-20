@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Marisol Bennett.
 
-1. `git checkout -b notices/<job>`.
+1. Your worktree is already on the job's branch, `notices/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `public/views/notices.js`, `public/alerts.js`, `src/push.ts`, `src/alerts.ts`,
    `test/unit/alerts.test.ts` and `test/unit/push.test.ts`. Add a test for every new
    rule in `test/unit/alerts.test.ts` or `test/unit/push.test.ts`. A change that needs a new browser check is flagged

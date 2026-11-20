@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Nadia Fraser.
 
-1. `git checkout -b home/<job>`.
+1. Your worktree is already on the job's branch, `home/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `public/views/home.js`. The hub has no client unit tests; a change it needs
    covered by a new browser check is flagged to Nadia Fraser, because `test/e2e/` is protected.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,

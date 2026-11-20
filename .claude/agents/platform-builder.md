@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Roman Greene.
 
-1. `git checkout -b platform/<job>`.
+1. Your worktree is already on the job's branch, `platform/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `src/index.ts`, `src/env.ts`, `src/github-jobs.ts`, `src/text-modules.d.ts`,
    `src/routes/**`, `test/unit/helpers.ts`, `test/unit/setup.ts`, `test/unit/headers.test.ts`,
    `test/unit/github-jobs.test.ts` and `test/unit/admin-api.test.ts`. Add a test for every new rule or route.
