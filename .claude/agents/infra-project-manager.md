@@ -47,8 +47,8 @@ report, with reasons.
 
 ### Report
 
-Report to the orchestrator. Write the whole report with `Write` to `briefs/<job>-report.md` in your worktree, using
-the job id from your brief (for example `briefs/IC-1-report.md`). Start it with "Notices for other teams". Then also
+Report to the orchestrator. Write the whole report with `Write` to `briefs/<number>-report.md` in your worktree, using
+the pull request number from your brief (for example `briefs/54-report.md`). Start it with "Notices for other teams". Then also
 send it with `SendMessage` to the orchestrator. If that fails, say so in the file and as your final message. Write
 nothing else with `Write`. The report covers: the branch or pull request reviewed, or the scope, findings or runbook
 text; what ran and its results; the verdict or sign-off; and anything that failed or was skipped.

@@ -14,7 +14,8 @@ can't change it.
 
 You receive the scope and acceptance criteria from Reegan Wade.
 
-1. `git checkout -b events/<job>`.
+1. Your worktree is already on the job's branch, `events/<number>`, and its draft pull request is open. Don't
+   create a branch.
 2. Build the scope, editing only `src/events.ts`, `public/events.js` and `test/unit/events.test.ts`. Add a test for
    every new rule or page.
 3. Run the full test list: `npm test`, `npm run test:e2e`, `npx tsc --noEmit`, `npx tsc -p test`,
