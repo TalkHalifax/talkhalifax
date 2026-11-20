@@ -103,11 +103,11 @@ function renderHome() {
     return `<button type="button" class="card glass${i === 0 ? " lead" : ""}" data-article="${esc(x.id)}">
       ${head(x)}
       ${note}
-      <span class="ft">${left}<span style="display:inline-flex;align-items:center;gap:10px">${messages(r)}${viewers}</span></span></button>`;
+      <span class="ft"><span>${left} ${messages(r)}</span>${viewers}</span></button>`;
   }).join("");
   const feedCards = feed.map(x => `<button type="button" class="card glass archived" data-article="${esc(x.id)}">
       ${head(x)}
-      <span class="ft"><span>${esc(stamp(x))}</span>${messages(x.room)}</span></button>`).join("");
+      <span class="ft"><span><span>${esc(stamp(x))}</span> ${messages(x.room)}</span></span></button>`).join("");
   const html = pinCards ? pinCards + feedCards
     : feedCards ? '<div class="msg">Nothing developing right now.</div>' + feedCards
     : '<div class="msg">Nothing developing right now. New stories appear here as the newsroom publishes them, and settled ones are in <a href="#articles" data-go="articles">Articles</a>.</div>';
