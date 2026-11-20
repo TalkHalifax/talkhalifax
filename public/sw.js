@@ -126,8 +126,9 @@ self.addEventListener("pushsubscriptionchange", e => {
       } catch (err) { status = null; }
     }
     // 4. Save the new address with those choices; with no choices to carry over, or if saving fails, drop it
+    let saved = false;
     if (sub) {
-      let saved = false;
+      saved = false;
       if (status && status.subscribed === true) {
         try {
           const r = await postJson("/api/push/subscribe", { subscription: sub.toJSON(), kinds: status.kinds, quiet: status.quiet });
@@ -138,8 +139,8 @@ self.addEventListener("pushsubscriptionchange", e => {
         try { await sub.unsubscribe().catch(() => {}); } catch (err) { /* nothing more to do */ }
       }
     }
-    // 5. Remove the old address, unless it's the same as the new one
-    if (old && !(sub && sub.endpoint === old.endpoint)) {
+    // 5. Remove the old address, unless the same address was just saved
+    if (old && !(saved && sub.endpoint === old.endpoint)) {
       try { await postJson("/api/push/unsubscribe", { endpoint: old.endpoint }); } catch (err) { /* nothing more to do */ }
     }
   })().catch(() => {}));
