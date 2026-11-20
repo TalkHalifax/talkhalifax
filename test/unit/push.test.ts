@@ -788,9 +788,9 @@ describe("the source itself (NOT-1 D2)", () => {
     expect(sources["../../src/push.ts"]).toBeTypeOf("string");
     expect(sources["../../src/push.ts"]).not.toMatch(/console\./);
   });
-  it("sweepSubscriptions is used nowhere else yet, in src or the unit tests", () => {
+  it("sweepSubscriptions is used only by the cron list", () => {
     expect(Object.keys(sources).length).toBeGreaterThan(20);
     const users = Object.entries(sources).filter(([f, text]) => f !== "../../src/push.ts" && f !== "./push.test.ts" && /sweepSubscriptions/.test(text)).map(([f]) => f);
-    expect(users).toEqual([]);
+    expect(users.every(f => f === "../../src/routes/cron-jobs.ts")).toBe(true);
   });
 });
