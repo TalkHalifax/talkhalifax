@@ -87,13 +87,14 @@ function renderHome() {
     const n = Number(r && r.messages) || 0;
     return `<span class="pill${n ? "" : " zero"}">${n} ${n === 1 ? "message" : "messages"}${offline ? ", last seen" : ""}</span>`;
   };
-  const stamp = x => (x.lastUpdate ? "Updated " + when(x.lastUpdate) : "Published " + when(x.publishedAt));
+  // A version 1 story has never changed, whatever its last-written time says (as in article.js)
+  const changed = x => x.version > 1 && x.lastUpdate;
+  const stamp = x => (changed(x) ? "Updated " + when(x.lastUpdate) : "Published " + when(x.publishedAt));
   const pinCards = pins.map((x, i) => {
     const r = x.room || {};
-    const recentUpdate = x.lastUpdate && Date.now() - t(x.lastUpdate) < 864e5;
+    const recentUpdate = changed(x) && Date.now() - t(x.lastUpdate) < 864e5;
     const left = `<span${recentUpdate ? ' class="upd"' : ""}>${esc(stamp(x))}</span>`;
-    // A version 1 story has never changed, whatever its last-written time says (as in article.js)
-    const note = x.version > 1 && x.lastUpdate && x.updateNote
+    const note = changed(x) && x.updateNote
       ? `<span class="dk"><span class="upd">Latest update</span> · ${esc(x.updateNote)}</span>` : "";
     // Viewer count: everyone with the story open, live when online, the last count we saw when offline
     const here = Number(r.here) || 0, who = here === 1 ? "person" : "people";
