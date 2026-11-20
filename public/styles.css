@@ -2,6 +2,7 @@
 :root {
   color-scheme: light;
   --chatw: 400px;         /* docked chat width */
+  --page-max: 1200px;     /* Home content max width, centred */
   /* Design system colour tokens: Light */
   --surface-page: #f5f6f7;
   --surface-solid: #ffffff;
@@ -96,8 +97,35 @@ header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-cont
 .more { all: unset; cursor: pointer; font-size: 13.5px; color: var(--accent); }
 .more:hover { text-decoration: underline; text-underline-offset: 3px; }
 
-/* Home: the developing stories */
-.home-top { margin-bottom: 20px; }
+/* Home: a front page plus feed. Developing pins, Latest, and a "Right now" side column at 1024px and up.
+   Each region stays hidden until Home fills it; #devCards holds pins and feed together until then. */
+.home-grid { max-width: var(--page-max); margin-inline: auto; }
+.home-main > * + * { margin-top: 36px; }
+.home-rail { margin-top: 36px; }
+@media (min-width: 1024px) {
+  .home-grid { display: flex; align-items: flex-start; gap: 32px; }
+  .home-main { flex: 1 1 0; min-width: 0; }
+  .home-rail { flex: 0 0 320px; min-width: 0; margin-top: 0; }
+}
+.sec-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 12px; }
+.sec-head h2 { margin: 0; font-family: var(--f-body); font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-muted); }
+.sec-count { font-family: var(--f-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-muted); }
+.sec-count:empty { display: none; }
+/* Feed: one row per settled story, type label, headline and timestamp */
+.feed { display: flex; flex-direction: column; border-top: 1px solid var(--line); position: relative; }
+.feed:empty { display: none; }
+.feed-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "type title stamp"; align-items: baseline; gap: 4px 12px; min-height: 44px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.feed-row .pill { grid-area: type; }
+.feed-row .tt { grid-area: title; font-family: var(--f-display); font-weight: 600; font-size: 16px; text-wrap: balance; }
+.feed-row .stamp { grid-area: stamp; }
+.feed-row:hover .tt { text-decoration: underline; text-underline-offset: 3px; }
+/* all: unset beats the global focus rule, so the row brings its own */
+.feed-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-s); }
+@media (max-width: 560px) {
+  .feed-row { grid-template-columns: auto 1fr; grid-template-areas: "type stamp" "title title"; }
+  .feed-row .stamp { justify-self: end; }
+}
+.stamp { font-family: var(--f-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-muted); white-space: nowrap; }
 .forum-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
 .forum-top h1 { font-family: var(--f-display); font-weight: 700; font-size: 32px; line-height: 1.08; letter-spacing: -.025em; margin: 0; }
 .sorts { display: flex; gap: 16px; }
@@ -114,9 +142,14 @@ header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-cont
 .card:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .card .k { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
 .card .tt { font-weight: 600; letter-spacing: -.01em; font-size: 17px; line-height: 1.3; text-wrap: pretty; }
+/* Home headlines in the display face. Only #home: articles, profiles and events share .card .tt */
+#home .card .tt { font-family: var(--f-display); letter-spacing: -.025em; text-wrap: balance; }
 .card .dk { font-size: 14.5px; color: var(--muted); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card .ft { margin-top: auto; padding-top: 6px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--muted); }
 .card .ft .recent { color: var(--ok); }
+/* Footer left group: stamp and pill together on the left, viewers pushed right */
+.card .ft-start { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.card .ft-start ~ .viewers { margin-left: auto; }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-family: var(--f-body); font-size: 12.5px; font-variant-numeric: tabular-nums; background: var(--field); border: 1px solid var(--glass-edge); color: var(--ink); white-space: nowrap; }
 .pill.zero { color: var(--muted); }
 /* Live viewer counter on developing cards: a headshot and how many people have the story open */
@@ -129,7 +162,6 @@ header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-cont
 }
 @keyframes viewerPulse { 50% { opacity: .45; } }
 .card.lead { grid-column: 1 / -1; padding: 24px 24px 20px; }
-@media (min-width: 760px) { .card.lead { grid-column: span 2; } }
 .card.lead .tt { font-family: var(--f-display); font-weight: 700; font-size: 28px; line-height: 1.12; letter-spacing: -.025em; }
 .card.lead .dk { font-size: 16px; -webkit-line-clamp: 3; }
 /* Alert banners: city notices and weather warnings, pinned under the header on Home. Solid bands, not glass. */
@@ -455,13 +487,15 @@ header .wx:not([hidden]) + .hnav { margin-left: 0; }
 @keyframes dr-out { to { transform: translateX(100%); } }
 @keyframes dr-fade { from { opacity: 0; } }
 @keyframes dr-fade-out { to { opacity: 0; } }
-#devCards { position: relative; }
+#devCards, #pins, #feed { position: relative; }
 .card.ghost { position: absolute; margin: 0; pointer-events: none; z-index: 1; }
-.live-h { display: flex; align-items: center; gap: 12px; }
-.live-h::after { content: "LIVE"; font-family: var(--f-body); font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--signal-warn); }
+/* LIVE sits in a 12px label head, and only when its section holds a developing card */
+.live-h { display: flex; align-items: center; gap: 10px; }
+.live-h::after { font-family: var(--f-body); font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--signal-warn); }
+.home-sec:has(.card[data-article]:not(.archived)) .live-h::after { content: "LIVE"; }
 .section-gap { margin-top: 44px; }
 .sect-title { font-family: var(--f-display); font-weight: 700; font-size: 28px; line-height: 1.1; letter-spacing: -.025em; margin: 0; }
-.card .upd { color: var(--warn); font-weight: 600; }
+.card .upd { color: var(--ink); font-weight: 600; }
 .card.archived .k { color: var(--muted); }
 .updated-banner { margin: 16px 0 0; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 9%, transparent); font-size: 14.5px; }
 .updated-banner b { color: var(--warn); }

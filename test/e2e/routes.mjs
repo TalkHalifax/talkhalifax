@@ -111,6 +111,19 @@ try {
   }
   browser = await puppeteer.launch({ executablePath: browserPath(), headless: true, userDataDir: mkdtempSync(join(tmpdir(), "th-e2e-")), args: process.env.CI ? ["--no-sandbox"] : [] });
   const errors = [];
+  // #62 T5 and T6: the boxes of Home's grid, main column and "Right now" rail, with the rail shown (a stand-in line in it) or
+  // hidden, and whether the page scrolls sideways. One evaluate, so the change and the reads go together.
+  const homeColumns = (p, showRail) => p.evaluate(show => {
+    const rail = document.getElementById("homeRail");
+    if (show) {
+      rail.hidden = false;
+      document.getElementById("railBody").insertAdjacentHTML("beforeend", "<p>A stand-in for the rail</p>");
+    } else {
+      rail.hidden = true;
+    }
+    const box = sel => { const r = document.querySelector(sel).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width }; };
+    return { grid: box("#home .home-grid"), main: box("#home .home-main"), rail: box("#homeRail"), wide: document.documentElement.scrollWidth > innerWidth };
+  }, showRail);
 
   for (const [width, height, label] of [[1280, 900, "desktop"], [375, 812, "phone"]]) {
     const open = async hash => {
@@ -247,6 +260,201 @@ try {
     await wait(500);
     ok(await view(p) === "articles", `${label}: and goes back to a list`);
     await p.close();
+
+    // #62 T1, T2 and T3: one read-only Home page for its regions, its section heads and its one heading
+    {
+      const p = await open("home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+
+      // #62 T1: Home has its grid, its Developing and Latest sections, a labelled "Right now" side column, and their heads
+      {
+        ok(await view(p) === "home", `${label}: Home shows the home view`);
+        const has = await p.evaluate(() => ({
+          grid: !!document.querySelector("#home .home-grid"),
+          pins: !!document.querySelector("#home #pinsSec #pins"),
+          feed: !!document.querySelector("#home #feedSec #feed"),
+          rail: !!document.querySelector('aside#homeRail[aria-labelledby="railH"]'),
+          heads: ["railH", "pinsH", "feedH"].map(id => document.getElementById(id)?.textContent.trim() ?? ""),
+        }));
+        ok(has.grid, `${label}: Home has its grid`);
+        ok(has.pins, `${label}: Home has a Developing section with a place for its cards`);
+        ok(has.feed, `${label}: Home has a Latest section with a place for its feed`);
+        ok(has.rail, `${label}: Home has a side column labelled by its head`);
+        ok(has.heads[0] === "Right now", `${label}: the side column's head reads Right now`, has.heads[0]);
+        ok(has.heads[1] === "Developing", `${label}: the Developing section's head reads Developing`, has.heads[1]);
+        ok(has.heads[2] === "Latest", `${label}: the Latest section's head reads Latest`, has.heads[2]);
+      }
+
+      // #62 T3: Home has exactly one h1, there for screen readers and kept off-screen
+      {
+        const h1 = await p.evaluate(() => {
+          const all = document.querySelectorAll("#home h1");
+          const r = all[0]?.getBoundingClientRect();
+          return { count: all.length, off: !!r && (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.width * r.height <= 1) };
+        });
+        ok(h1.count === 1, `${label}: Home has exactly one h1`, `found ${h1.count}`);
+        ok(h1.off, `${label}: Home's h1 is kept off-screen, for screen readers`);
+      }
+
+      // Until build 3 (Home): home.js fills and unhides #pinsSec, #feedSec and #homeRail and empties #devCards. Build 3 rewrites the lines between here and "end until build 3".
+      // #62 T2: until Home fills them, the Developing, Latest and Right now regions are hidden and take no space, and the stories are in #devCards
+      {
+        await p.waitForSelector('#devCards [data-article="e2e-developing"]', { timeout: 5000 }).catch(() => {});
+        const shut = await p.evaluate(() => {
+          const off = id => { const el = document.getElementById(id); return !!el && el.hidden === true && el.getBoundingClientRect().height === 0; };
+          const dev = document.getElementById("devCards");
+          return { pins: off("pinsSec"), feed: off("feedSec"), rail: off("homeRail"), dev: !!dev && dev.getBoundingClientRect().height > 0 && !!dev.querySelector('[data-article="e2e-developing"]') };
+        });
+        ok(shut.pins, `${label}: the Developing section stays hidden and takes no space until Home fills it`);
+        ok(shut.feed, `${label}: the Latest section stays hidden and takes no space until Home fills it`);
+        ok(shut.rail, `${label}: the Right now column stays hidden and takes no space until Home fills it`);
+        ok(shut.dev, `${label}: the stories show in #devCards meanwhile, the developing one among them`);
+      }
+
+      // #62 T3: no heading shows above Home's cards
+      {
+        const above = await p.evaluate(() => {
+          const top = document.getElementById("devCards").getBoundingClientRect().top;
+          return [...document.querySelectorAll("#home :is(h1,h2,h3,h4,h5,h6)")].filter(h => {
+            const r = h.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < top;
+          }).map(h => h.textContent.trim());
+        });
+        ok(!above.length, `${label}: no heading shows above Home's cards`, above.join(" | "));
+      }
+      // end until build 3
+
+      await p.close();
+    }
+
+    // #62 T4: LIVE follows content: the Developing head says LIVE only once a story still developing is in its section
+    {
+      const p = await open("home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const live = await p.evaluate(() => {
+        const pins = document.getElementById("pins");
+        const after = () => getComputedStyle(document.getElementById("pinsH"), "::after").content;
+        pins.replaceChildren();
+        const empty = after();
+        document.getElementById("pinsSec").hidden = false;
+        const shown = after();
+        pins.insertAdjacentHTML("beforeend", '<button type="button" class="card glass archived" data-article="e2e-probe-settled"><span class="tt">x</span></button>');
+        const settled = after();
+        pins.insertAdjacentHTML("beforeend", '<button type="button" class="card glass" data-article="e2e-probe-live"><span class="tt">x</span></button>');
+        const developing = after();
+        return { empty, shown, settled, developing };
+      });
+      const quiet = v => v === "none" || v === "normal";
+      ok(quiet(live.empty), `${label}: the Developing head doesn't say LIVE while its section is hidden and empty`, live.empty);
+      ok(quiet(live.shown), `${label}: nor once the section shows with no stories in it`, live.shown);
+      ok(quiet(live.settled), `${label}: nor with only a settled story in it`, live.settled);
+      ok(live.developing === '"LIVE"', `${label}: it says LIVE once a developing story is in it`, live.developing);
+      await p.close();
+    }
+
+    // #62 T5: on a phone the "Right now" rail sits below the main column; on desktop with no rail the main column takes the whole grid, 1200px at most
+    {
+      const p = await open("home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      if (width === 375) {
+        const { main, rail } = await homeColumns(p, true);
+        ok(rail.width > 0 && rail.top >= main.bottom - 1, `${label}: the Right now rail sits below the main column`, JSON.stringify({ main, rail }));
+      }
+      if (width === 1280) {
+        const { grid, main, rail } = await homeColumns(p, false);
+        ok(rail.width === 0, `${label}: a hidden Right now rail takes no width`, `${rail.width}px`);
+        ok(Math.abs(main.width - grid.width) <= 1, `${label}: with no rail the main column takes the whole grid`, `${main.width}px of ${grid.width}px`);
+        ok(grid.width <= 1200, `${label}: the Home grid is 1200px wide at most`, `${grid.width}px`);
+      }
+      await p.close();
+    }
+
+    // #62 T6: on a phone Home never scrolls sideways
+    if (width === 375) {
+      const p = await open("home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const fits = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: innerWidth }));
+      ok(fits.scroll <= fits.inner, `${label}: Home fits the phone's width, with no sideways scroll`, `${fits.scroll}px in ${fits.inner}px`);
+      await p.close();
+    }
+
+    // #62 T7: Home card headlines are in Inter Tight and balanced, the updated mark is in ink, and on desktop the lead card spans its grid
+    {
+      const p = await open("home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const look = await p.evaluate(() => {
+        const cards = [...document.querySelectorAll("#home .card[data-article]")].filter(el => el.getBoundingClientRect().height > 0);
+        const tts = cards.flatMap(el => [...el.querySelectorAll(".tt")]).map(el => { const s = getComputedStyle(el); return { font: s.fontFamily, style: s.textWrapStyle, wrap: s.textWrap }; });
+        const out = {
+          checked: tts.length,
+          fonts: [...new Set(tts.map(t => t.font))],
+          wraps: [...new Set(tts.map(t => `${t.style}/${t.wrap}`))],
+          face: tts.every(t => /^"?Inter Tight"?(,|$)/.test(t.font)),
+          balanced: tts.every(t => t.style === "balance" || /\bbalance\b/.test(t.wrap)),
+          upd: "", ink: "", warn: "",
+        };
+        const first = cards[0];
+        if (first) {
+          first.insertAdjacentHTML("beforeend", '<span class="upd"></span><span style="color: var(--ink)"></span><span style="color: var(--signal-warn)"></span>');
+          const spans = [...first.children].slice(-3);
+          [out.upd, out.ink, out.warn] = spans.map(el => getComputedStyle(el).color);
+          spans.forEach(el => el.remove());
+        }
+        const lead = document.querySelector("#home .card.lead");
+        out.lead = !!lead;
+        if (lead) {
+          const grid = lead.parentElement, r = lead.getBoundingClientRect(), g = grid.getBoundingClientRect();
+          out.tracks = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length;
+          out.edges = Math.abs(r.left - g.left) <= 1 && Math.abs(r.right - g.right) <= 1;
+          out.box = { left: r.left, right: r.right, gridLeft: g.left, gridRight: g.right };
+        }
+        return out;
+      });
+      ok(look.checked > 0, `${label}: Home has card headlines to check`, `${look.checked} checked; ${look.fonts.join(" | ")}`);
+      ok(look.face, `${label}: every Home card headline is in Inter Tight`, look.fonts.join(" | "));
+      ok(look.balanced, `${label}: every Home card headline is balanced`, look.wraps.join(" | "));
+      ok(!!look.upd && look.upd === look.ink, `${label}: the updated mark on a card is in ink`, `${look.upd} vs ${look.ink}`);
+      ok(look.upd !== look.warn, `${label}: and not in the warning red`, `${look.upd} vs ${look.warn}`);
+      if (width === 1280) {
+        ok(look.lead, `${label}: Home has a lead card`);
+        ok(look.tracks >= 2, `${label}: the lead card's grid has two or more columns`, `${look.tracks} columns`);
+        ok(look.edges === true, `${label}: the lead card spans its grid from edge to edge`, JSON.stringify(look.box));
+      }
+      await p.close();
+    }
+  }
+
+  // #62 T5 and T6 at the 1024px breakpoint: the "Right now" rail beside the main column at 1024px, below it at 1023px
+  {
+    const openAt = async (width, hash) => {
+      const p = await browser.newPage();
+      p.on("pageerror", e => errors.push(`${width} #${hash}: ${e.message}`));
+      await p.setViewport({ width, height: 900 });
+      await p.goto(`${B}/#${hash}`, { waitUntil: "load" });
+      await wait(500);
+      return p;
+    };
+
+    // #62 T5 at 1023: one pixel under the breakpoint the rail drops below the main column
+    {
+      const p = await openAt(1023, "home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const { main, rail } = await homeColumns(p, true);
+      ok(rail.width > 0 && rail.top >= main.bottom - 1, "1023: the Right now rail sits below the main column", JSON.stringify({ main, rail }));
+      await p.close();
+    }
+
+    // #62 T5 and T6 at 1024: the rail sits beside the main column, 320px wide, and the page doesn't scroll sideways
+    {
+      const p = await openAt(1024, "home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const { main, rail, wide } = await homeColumns(p, true);
+      ok(Math.abs(rail.top - main.top) <= 1, "1024: the Right now rail's top lines up with the main column's", `${rail.top} vs ${main.top}`);
+      ok(rail.left >= main.right - 1, "1024: the rail sits to the right of the main column", `${rail.left} vs ${main.right}`);
+      ok(Math.abs(rail.width - 320) <= 0.5, "1024: the rail is 320px wide", `${rail.width}px`);
+      ok(!wide, "1024: Home with the rail doesn't scroll sideways");
+      await p.close();
+    }
   }
 
   ok(!errors.length, "no script errors", errors.slice(0, 5).join("; "));

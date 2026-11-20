@@ -5,7 +5,9 @@ Change a token there, not a colour in a rule._
 
 ## The idea
 
-**White, frosted and quiet.** Home is a grid of glass cards on a near-white page. Each story is a room: the article on
+**White, frosted and quiet.** Home is a front page plus a feed on a near-white page: the developing stories pinned as
+glass cards ("Developing"), the settled ones as a list ("Latest"), and a "Right now" side column on wide screens. Each
+story is a room: the article on
 the left, its live chat docked beside it. After dark the same system turns to **Charcoal**. Only the colour tokens change.
 Colour is held back: ink on paper, with red and amber kept for warnings, and one "splash" colour still to be chosen.
 
@@ -39,6 +41,7 @@ Older names (`--bg`, `--glass`, `--muted`, `--accent`, `--warn`, …) are aliase
 Rules:
 - Text on any surface meets WCAG AA (4.5:1 body, 3:1 large). Check both themes when adding a colour.
 - Signal colours mean something. Never use red or amber for decoration.
+- `--signal-warn` is for warnings, errors and LIVE, never "Updated". An updated stamp is `--ink` at 600.
 - Alert banners are solid, never glass, so they read at a glance over anything.
 
 ## Type
@@ -65,10 +68,14 @@ uppercase, `.1em` tracking. Reading width stays under about 68ch.
 
 | Width | Layout |
 |---|---|
+| ≥ 1024px | Home is two columns, the main column plus the 320px "Right now" column on the right (32px gap, top-aligned), when the side column has content; otherwise the main column fills the width |
+| < 1024px | Home is one column; "Right now" stacks below the main column (36px above it) |
 | ≥ 960px | Story with the chat docked on the right (`--chatw` 400px), full header nav |
 | < 960px | The chat becomes a bottom sheet; its header bar toggles it |
-| < 760px | Header sections move into the drawer behind the profile button; lead card stops spanning two columns |
+| < 760px | Header sections move into the drawer behind the profile button |
 | < 560px | Phone spacing: tighter gutters, smaller section titles, shallower reply indents |
+
+Home content is at most `--page-max` (1200px) wide, centred. The lead story card spans the full row at every width.
 
 Page gutters are `max(28px, safe-area inset)`. The viewport disables pinch zoom (it's an app-like surface), so
 text sizes must already be readable: 16px body minimum on inputs to stop iOS zooming.
@@ -87,7 +94,12 @@ text sizes must already be readable: 16px body minimum on inputs to stop iOS zoo
 | Global footer | `.site-foot` | Anchored to the bottom (the body is a full-height column and `main` grows), on every view (hidden under the full-screen Transit map on phones) on the sunken surface. The brand row (app icon, wordmark, one line) sits beside three columns: Read (every section), Stay in the loop (Get alerts; Install the app, on phones and wherever the browser offers its install prompt, hidden inside the installed app; profile; privacy) and Our sources (official sites, ↗ external). The fine print sits under a hairline and ends with the site version (`v<PR number>` live, `dev` locally) in mono at 12px, `--ink-muted`. Four columns on desktop; two under 860px, with sources full width under 560px. Clears the docked chat |
 | App icon | `public/icons/` | A Halifax skyline (lighthouse, the Macdonald Bridge, City Hall's clock tower, the Dominion Building, a church spire, towers behind) over the harbour, navy on pale blue, no words. Rounded for `any`; full-bleed with the skyline inside the 80% safe zone for `maskable`; square for Apple's touch icon; the 32 px favicon is cropped to the bridge and clock tower |
 | Drawer | `.drawer`, `.dr-*` | Phone navigation and account, a native `<dialog>` |
-| Story card | `.card` (`.lead` spans 2) | Glass; kicker, headline, dek, pills, live viewer count |
+| Home layout | `.home-grid`, `.home-main`, `.home-sec`, `.home-rail`, `.rail-body` | `.home-grid` (max `--page-max`, centred) holds `.home-main` and the `.home-rail` aside ("Right now", `#homeRail`, labelled by `#railH`, body `#railBody`). In `.home-main`, sections `#pinsSec` ("Developing", cards in `#pins`, count in `#pinsCount`) and `#feedSec` ("Latest", rows in `#feed`) sit 36px apart. Every region carries `hidden` until Home fills it, so an empty one takes no space. The page's only heading until then is a visually hidden h1 (`.sr`). `#devCards` is transitional: it holds the pins and the feed together, with no visible head, until Home renders into `#pins` and `#feed` |
+| Section head | `.sec-head`, `.sec-count` | The label style: 12px Inter 600, uppercase, `.1em` tracking, `--ink-muted`. `.sec-count` beside it in 12px mono, tabular, hidden while empty. A head with `.live-h` shows LIVE (12px, 700, `--signal-warn`) only when its `.home-sec` holds a developing (non-archived) card |
+| Feed row | `.feed`, `.feed-row` | A list under a hairline, one row per story: `.pill` as the type label, headline (`.tt`, display 600 16px, balanced) and `.stamp`. At least 44px tall, underline on hover, its own 2px `--focus` outline. Under 560px the type and stamp share the first line with the headline below. An empty `.feed` takes no space |
+| Timestamp | `.stamp` | 12.5px mono, tabular, `--ink-muted`, never wraps |
+| Story card | `.card` (`.lead` spans the full row) | Glass; kicker, headline, dek, pills, live viewer count. On Home the headline is the display face with `text-wrap: balance` (lead 700/28px, others 600/17px). `.upd` (a recent update) is `--ink` at 600, not red. The live viewer icon is `--signal-warn` |
+| Card footer group | `.ft-start` | Inside `.ft`, groups the stamp and pill on the left; the viewer count after it is pushed right |
 | Pill | `.pill` | Status labels (LIVE, Update, area) |
 | Alert banner | `.abar` | Solid band on Home for city notices and weather warnings |
 | Byline | `.byline` | Author, date, read time, then the AI disclosure linking to the source. An "Updated" time only if the story has really changed |

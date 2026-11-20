@@ -43,10 +43,24 @@
 
 <main>
   <section class="view wrap" id="home">
-    <div class="forum-top home-top">
-      <h1 class="live-h">Developing Stories</h1>
+    <h1 class="sr">Developing and latest stories</h1>
+    <div class="home-grid">
+      <div class="home-main">
+        <div class="cards" id="devCards"><div class="msg">Loading…</div></div>
+        <section class="home-sec" id="pinsSec" hidden>
+          <div class="sec-head"><h2 class="live-h" id="pinsH">Developing</h2><span class="sec-count" id="pinsCount"></span></div>
+          <div class="cards" id="pins"></div>
+        </section>
+        <section class="home-sec" id="feedSec" hidden>
+          <div class="sec-head"><h2 id="feedH">Latest</h2></div>
+          <div class="feed" id="feed"></div>
+        </section>
+      </div>
+      <aside class="home-rail" id="homeRail" aria-labelledby="railH" hidden>
+        <div class="sec-head"><h2 id="railH">Right now</h2></div>
+        <div class="rail-body" id="railBody"></div>
+      </aside>
     </div>
-    <div class="cards" id="devCards"><div class="msg">Loading…</div></div>
   </section>
 
   <section class="view wrap" id="events" hidden></section>
