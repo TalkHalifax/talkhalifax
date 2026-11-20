@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { refreshAlerts } from "../alerts";
 import { checkEvents } from "../events";
 import { startGithubJobs } from "../github-jobs";
+import { SWEEP_AFTER_DAYS, sweepSubscriptions } from "../push";
 import { evaluateStages } from "../stories";
 import { checkTransitSchedule } from "../transit";
 import { refreshWeather } from "../weather";
@@ -37,4 +38,5 @@ export const CRON_JOBS: readonly CronJob[] = [
   { key: "transit schedule", run: async () => checkTransitSchedule(), name: "Transit schedule check", does: "Warns before the map's schedule data runs out", every: "30 minutes" },
   { key: "GitHub jobs", run: startGithubJobs, name: "GitHub jobs", does: "Starts the library events and Transit jobs", every: "30 minutes" },
   { key: "clean-up", run: tidyUp, name: "Clean-up", does: "Expired sessions, links, rate limits and old counts", every: "30 minutes" },
+  { key: "push sweep", run: sweepSubscriptions, name: "Alert address clean-up", does: `Deletes alert addresses with no alert reaching them or change in ${SWEEP_AFTER_DAYS} days, or after five failed alerts`, every: "Daily (checked every 30 minutes)" },
 ];
