@@ -16,7 +16,7 @@ const win = process.platform === "win32";
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const STORIES = [
-  { id: "e2e-developing", kind: "article", stage: "developing", headline: "A story still developing", list: "home", cards: "#devCards", chat: true },
+  { id: "e2e-developing", kind: "article", stage: "developing", headline: "A story still developing", list: "home", cards: "#pins", chat: true },
   { id: "e2e-article", kind: "article", stage: "archived", headline: "A story that has settled", list: "articles", cards: "#articles", chat: false },
   { id: "e2e-notice", kind: "notice", stage: "developing", headline: "A notice about a road", list: "notices", cards: "#notices", chat: false },
 ];
@@ -35,6 +35,10 @@ const SEED_LAYOUT = story("e2e-new", "article", "Province", "https://news.novasc
   + story("e2e-old", "article", "City Hall", "https://www.halifax.ca/x", 1, "", FACTS, '["First."]', '["An older point."]', "[]")
   + story("hw-e2e-changed", "notice", "Halifax Water", "https://www.halifaxwater.ca/x", 2, "The advisory was lifted", FACTS, '["First."]', '["Boil water."]', "[]");
 const SEED_WEATHER = `INSERT INTO feeds (name, body, updated_at) VALUES ('weather', '${WEATHER}', '${now}');`;
+const ALERTS = JSON.stringify({ updatedAt: now, items: [
+  { cat: "Weather", kind: "Warning", title: "Wind warning in effect", detail: "", until: new Date(Date.parse(now) + 12 * 36e5).toISOString().replace(/\.\d+Z$/, "Z"), url: "https://weather.gc.ca/", publishedAt: now },
+  { cat: "Weather", kind: "Watch", title: "Rainfall watch in effect", detail: "", until: "", url: "https://weather.gc.ca/", publishedAt: now } ] });
+const SEED_ALERTS = `INSERT INTO feeds (name, body, updated_at) VALUES ('alerts', '${ALERTS}', '${now}');`; // fresh, so the Worker never fetches Environment Canada
 // The API checks' own fake accounts, sessions, stories, chat messages, comments and report. Times are in ms, as the app keeps them.
 const T = Date.now();
 const dayBefore = new Date(Date.parse(now) - 864e5).toISOString().replace(/\.\d+Z$/, "Z"); // sorts below the cards above
@@ -93,7 +97,7 @@ await checkSwPush(ok);
 
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
-writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_API}`);
+writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_ALERTS} ${SEED_API}`);
 npx([...WRANGLER, "d1", "execute", "talkhalifax-test", "--local", "--persist-to", DATA, "--file", `${DATA}/seed.sql`]);
 
 const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
@@ -209,7 +213,7 @@ try {
     // Only a boil-water advisory pins to Home; one street's emergency shut-off stays on Notices
     {
       const p = await open("home");
-      // A real weather warning, fetched live, can come first and fold the rest behind "+1 more"
+      // The seeded wind warning comes first and folds the rest behind "+1 more"
       await p.evaluate(() => document.getElementById("abarMore")?.click());
       const bars = await p.evaluate(() => document.getElementById("abars").innerText);
       ok(bars.includes("Boil Water Advisory"), `${label}: a boil-water advisory pins to Home`);
@@ -296,34 +300,170 @@ try {
         ok(h1.off, `${label}: Home's h1 is kept off-screen, for screen readers`);
       }
 
-      // Until build 3 (Home): home.js fills and unhides #pinsSec, #feedSec and #homeRail and empties #devCards. Build 3 rewrites the lines between here and "end until build 3".
-      // #62 T2: until Home fills them, the Developing, Latest and Right now regions are hidden and take no space, and the stories are in #devCards
-      {
-        await p.waitForSelector('#devCards [data-article="e2e-developing"]', { timeout: 5000 }).catch(() => {});
-        const shut = await p.evaluate(() => {
-          const off = id => { const el = document.getElementById(id); return !!el && el.hidden === true && el.getBoundingClientRect().height === 0; };
-          const dev = document.getElementById("devCards");
-          return { pins: off("pinsSec"), feed: off("feedSec"), rail: off("homeRail"), dev: !!dev && dev.getBoundingClientRect().height > 0 && !!dev.querySelector('[data-article="e2e-developing"]') };
-        });
-        ok(shut.pins, `${label}: the Developing section stays hidden and takes no space until Home fills it`);
-        ok(shut.feed, `${label}: the Latest section stays hidden and takes no space until Home fills it`);
-        ok(shut.rail, `${label}: the Right now column stays hidden and takes no space until Home fills it`);
-        ok(shut.dev, `${label}: the stories show in #devCards meanwhile, the developing one among them`);
-      }
+      // #62 T2, filled by build 3: Home fills and shows its Developing pins, its Latest feed and its "Right now" rail
+      await p.waitForSelector('#pins [data-article="e2e-developing"]', { timeout: 5000 }).catch(() => {});
+      await p.waitForFunction(() => document.querySelectorAll("#railBody h3").length === 3, { timeout: 10000 }).catch(() => {});
+      const home = await p.evaluate(() => {
+        const shown = id => { const el = document.getElementById(id); return !!el && el.hidden === false && el.getBoundingClientRect().height > 0; };
+        const stamped = el => { const t = el.querySelector("time.stamp[datetime]"); return !!t && Number.isFinite(Date.parse(t.getAttribute("datetime"))); };
+        const pins = document.getElementById("pins"), leads = [...document.querySelectorAll("#pins .card.lead")];
+        const cards = [...document.querySelectorAll("#pins .card[data-article]")];
+        const feed = [...document.getElementById("feed").children];
+        const rows = [...document.querySelectorAll("#feed .feed-row")];
+        const rail = document.getElementById("railBody");
+        const wx = rail.querySelector('a.feed-row[href="https://weather.gc.ca/"][target="_blank"][rel="noopener"]');
+        const notices = [...rail.querySelectorAll("a.feed-row[data-article]")];
+        const more = rail.querySelector('a.more[href="#notices"][data-go="notices"]');
+        return {
+          pins: shown("pinsSec"), feed: shown("feedSec"), rail: shown("homeRail"),
+          devGone: document.getElementById("devCards") === null,
+          pinIds: cards.map(c => c.dataset.article).sort(),
+          leads: leads.length, leadFirst: leads.length === 1 && leads[0] === pins.firstElementChild,
+          count: document.getElementById("pinsCount").textContent,
+          live: getComputedStyle(document.getElementById("pinsH"), "::after").content,
+          pinCards: cards.length,
+          pinFt: cards.every(c => { const s = c.querySelector(".ft > .ft-start"); return !!s && stamped(s) && !!s.querySelector(".pill"); }),
+          pinViewers: cards.every(c => !!c.querySelector(".ft-start + .viewers")),
+          feedKids: feed.length, feedRowsOnly: feed.every(el => el.matches("button.feed-row")), feedCards: document.querySelectorAll("#feed .card").length,
+          rowIds: rows.map(r => r.dataset.article),
+          rowPills: rows.map(r => r.querySelector(".pill")?.textContent.trim() ?? ""),
+          rowStamps: rows.length > 0 && rows.every(stamped),
+          firstTitle: document.querySelector("#feed .tt")?.textContent.trim() ?? "",
+          railHeads: JSON.stringify([...rail.querySelectorAll("h3")].map(h => h.textContent.trim())),
+          wx: !!wx, wxText: wx?.textContent ?? "", wxAbout: wx?.getAttribute("aria-label") ?? "",
+          railText: rail.textContent,
+          bars: document.getElementById("abars").innerText,
+          noticeIds: notices.map(a => a.dataset.article), noticeHref: notices[0]?.getAttribute("href") ?? "",
+          more: !!more, moreText: more?.textContent.trim() ?? "",
+        };
+      });
+      ok(home.pins, `${label}: the Developing section shows once Home fills it`);
+      ok(home.feed, `${label}: the Latest section shows once Home fills it`);
+      ok(home.rail, `${label}: the Right now column shows once Home fills it`);
+      ok(home.devGone, `${label}: #devCards is gone from Home`);
+      ok(JSON.stringify(home.pinIds) === JSON.stringify(["e2e-developing", "e2e-new", "e2e-old"]), `${label}: Developing pins the three developing stories`, home.pinIds.join(", "));
+      ok(home.leads === 1 && home.leadFirst, `${label}: exactly one pin is the lead, and it comes first`, `${home.leads} lead`);
+      ok(home.count === "3", `${label}: the Developing head counts 3`, home.count);
+      ok(home.live === '"LIVE"', `${label}: the Developing head says LIVE`, home.live);
+      ok(home.pinCards >= 1 && home.pinFt, `${label}: every pin has a timestamp and a message count`, `${home.pinCards} pins`);
+      ok(home.pinCards >= 1 && home.pinViewers, `${label}: every pin has a viewer count`, `${home.pinCards} pins`);
+      ok(home.feedKids >= 1 && home.feedRowsOnly && home.feedCards === 0, `${label}: Latest is feed rows only, no cards`, `${home.feedKids} children, ${home.feedCards} cards`);
+      ok(JSON.stringify(home.rowIds) === JSON.stringify(["e2e-article", "e2e-api-archived"]), `${label}: Latest lists the settled stories newest first`, home.rowIds.join(", "));
+      ok(home.rowPills.length > 0 && home.rowPills.every(t => t === "Story") && home.rowStamps, `${label}: each Latest row reads Story, with a timestamp`, home.rowPills.join(" | "));
+      ok(home.firstTitle === "A story that has settled", `${label}: the first Latest row is the settled story`, home.firstTitle);
+      ok(home.railHeads === JSON.stringify(["Weather", "Weather watches and statements", "Notices"]), `${label}: the Right now heads are Weather, watches and statements, then Notices`, home.railHeads);
+      ok(home.wx && home.wxText.includes("15°C") && home.wxText.includes("Sunny") && home.wxAbout.includes("feels like 15°C"), `${label}: the rail's weather row links to Environment Canada`, `${home.wxText.trim()} | ${home.wxAbout}`);
+      ok(home.railText.includes("Rainfall watch in effect") && !home.railText.includes("Wind warning in effect"), `${label}: the rail lists the weather watch, not the warning`);
+      ok(home.bars.includes("Wind warning in effect"), `${label}: the weather warning is in the alert bar`, home.bars);
+      ok(JSON.stringify(home.noticeIds) === JSON.stringify(["hw-e2e-boil"]) && home.noticeHref === "#article-hw-e2e-boil", `${label}: with an urgent notice, the rail shows only it`, `${home.noticeIds.join(", ")} ${home.noticeHref}`);
+      ok(home.more && home.moreText === "All notices", `${label}: the rail links to All notices`, home.moreText);
+      // All notices is a finger-sized target: 44px tall at least
+      const moreH = await p.evaluate(() => Math.round(document.querySelector("#railBody a.more")?.getBoundingClientRect().height ?? 0));
+      ok(moreH >= 44, `${label}: All notices is a 44px tap target`, `${moreH}px`);
 
-      // #62 T3: no heading shows above Home's cards
+      // #62 T3: no heading shows above Home's Developing section
       {
         const above = await p.evaluate(() => {
-          const top = document.getElementById("devCards").getBoundingClientRect().top;
+          const top = document.getElementById("pinsSec").getBoundingClientRect().top;
           return [...document.querySelectorAll("#home :is(h1,h2,h3,h4,h5,h6)")].filter(h => {
             const r = h.getBoundingClientRect();
-            return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < top;
+            return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.bottom <= top;
           }).map(h => h.textContent.trim());
         });
-        ok(!above.length, `${label}: no heading shows above Home's cards`, above.join(" | "));
+        ok(!above.length, `${label}: no heading shows above Home's Developing section`, above.join(" | "));
       }
-      // end until build 3
 
+      // The alert bar folds the boil-water advisory behind the wind warning; opening it shows the advisory
+      await p.evaluate(() => document.getElementById("abarMore")?.click());
+      ok((await p.evaluate(() => document.getElementById("abars").innerText)).includes("Boil Water Advisory"), `${label}: the alert bar still shows the boil-water advisory`);
+
+      // A Latest row opens its story, the way readers get there
+      {
+        const f = await open("home");
+        await f.waitForSelector('#feed [data-article="e2e-article"]', { timeout: 5000 }).catch(() => {});
+        const row = await f.$('#feed [data-article="e2e-article"]');
+        if (row) {
+          await row.evaluate(r => r.scrollIntoView({ block: "center" }));
+          await row.click();
+          await wait(600);
+        }
+        const hash = await f.evaluate(() => location.hash);
+        ok(hash === "#article-e2e-article" && await heading(f, "A story that has settled") === "A story that has settled" && await view(f) === "article", `${label}: clicking a Latest row opens its story`, `${hash} ${await view(f)}`);
+        await f.close();
+      }
+
+      // All notices, at the foot of the rail, opens Notices
+      {
+        const n = await open("home");
+        await n.waitForSelector("#railBody a.more", { timeout: 5000 }).catch(() => {});
+        const more = await n.$("#railBody a.more");
+        if (more) {
+          await more.evaluate(m => m.scrollIntoView({ block: "center" }));
+          await more.click();
+          await wait(500);
+        }
+        const got = await view(n);
+        ok(got === "notices", `${label}: All notices opens Notices`, got);
+        await n.close();
+      }
+
+      await p.close();
+    }
+
+    // Home rule 2: offline, the viewer counts read "last seen" and Home keeps its rail and its feed; back online they're live again
+    {
+      const p = await open("home");
+      await p.waitForSelector('#pins [data-article="e2e-developing"]', { timeout: 5000 }).catch(() => {});
+      await p.setOfflineMode(true);
+      await p.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await p.waitForFunction(() => { const v = [...document.querySelectorAll("#pins .viewers")]; return v.length > 0 && v.every(e => e.textContent.includes("last seen")); }, { timeout: 5000 }).catch(() => {});
+      const off = await p.evaluate(() => ({
+        viewers: [...document.querySelectorAll("#pins .viewers")].map(v => v.textContent.trim()),
+        rail: document.getElementById("homeRail").hidden === false,
+        rows: document.querySelectorAll("#feed .feed-row").length,
+      }));
+      ok(off.viewers.length >= 1 && off.viewers.every(t => t.includes("last seen")), `${label}: offline, every viewer count reads last seen`, off.viewers.join(" | "));
+      ok(off.rail && off.rows === 2, `${label}: offline, Home keeps its rail and its feed`, `rail ${off.rail ? "shown" : "hidden"}, ${off.rows} rows`);
+      await p.setOfflineMode(false);
+      await p.evaluate(() => window.dispatchEvent(new Event("online")));
+      await p.waitForFunction(() => ![...document.querySelectorAll("#pins .viewers")].some(e => e.textContent.includes("last seen")), { timeout: 5000 }).catch(() => {});
+      const on = await p.evaluate(() => [...document.querySelectorAll("#pins .viewers")].map(v => v.textContent.trim()));
+      ok(on.length >= 1 && !on.some(t => t.includes("last seen")), `${label}: back online, the viewer counts are live again`, on.join(" | "));
+      await p.close();
+    }
+
+    // Home's rail when the weather comes last: watches and notices show first, and the weather joins them when it lands,
+    // without waiting for the next stories or alerts refresh. The weather request is held back until the rest is in.
+    // Interception has to be on before the page loads, so this page is set up by hand rather than with open().
+    {
+      const p = await browser.newPage();
+      p.on("pageerror", e => errors.push(`${label} #home (held weather): ${e.message}`));
+      await p.setViewport({ width, height, isMobile: width < 500, hasTouch: width < 500 });
+      await p.setBypassServiceWorker(true); // sw.js caches /api/weather, which would answer without a request
+      await p.setRequestInterception(true);
+      let held = null, stories = 0, alerts = 0;
+      p.on("request", r => {
+        let path = "";
+        try { path = new URL(r.url()).pathname; } catch { /* not a URL: let it through */ }
+        if (path === "/api/weather" && !held) { held = r; return; }
+        if (path === "/api/stories") stories++;
+        if (path === "/api/alerts") alerts++;
+        r.continue().catch(() => {});
+      });
+      await p.goto(`${B}/#home`, { waitUntil: "load" });
+      await p.waitForFunction(() => JSON.stringify([...document.querySelectorAll("#railBody h3")].map(h => h.textContent.trim())) === JSON.stringify(["Weather watches and statements", "Notices"])
+        && !!document.querySelector('#pins [data-article="e2e-developing"]'), { timeout: 10000 }).catch(() => {});
+      const before = await p.evaluate(() => JSON.stringify([...document.querySelectorAll("#railBody h3")].map(h => h.textContent.trim())));
+      ok(!!held && before === JSON.stringify(["Weather watches and statements", "Notices"]), `${label}: with the weather held back, the rail shows watches and notices first`, `${held ? "held" : "not held"}; ${before}`);
+      const counts = { stories, alerts };
+      await held?.continue().catch(() => {});
+      await p.waitForFunction(() => document.querySelector("#railBody h3")?.textContent.trim() === "Weather" && [...document.querySelectorAll("#railBody .feed-row")].some(r => r.textContent.includes("15°C")), { timeout: 5000 }).catch(() => {});
+      const after = await p.evaluate(() => ({
+        first: document.querySelector("#railBody h3")?.textContent.trim() ?? "",
+        wx: [...document.querySelectorAll("#railBody .feed-row")].some(r => r.textContent.includes("15°C")),
+      }));
+      ok(after.first === "Weather" && after.wx && stories === counts.stories && alerts === counts.alerts, `${label}: when the weather arrives last, the rail adds it without waiting for a refresh`,
+        `first head ${after.first}; ${after.wx ? "" : "no "}15°C row; stories ${counts.stories}->${stories}, alerts ${counts.alerts}->${alerts}`);
       await p.close();
     }
 
@@ -345,10 +485,30 @@ try {
         return { empty, shown, settled, developing };
       });
       const quiet = v => v === "none" || v === "normal";
-      ok(quiet(live.empty), `${label}: the Developing head doesn't say LIVE while its section is hidden and empty`, live.empty);
+      ok(quiet(live.empty), `${label}: the Developing head doesn't say LIVE while its section is empty`, live.empty);
       ok(quiet(live.shown), `${label}: nor once the section shows with no stories in it`, live.shown);
       ok(quiet(live.settled), `${label}: nor with only a settled story in it`, live.settled);
       ok(live.developing === '"LIVE"', `${label}: it says LIVE once a developing story is in it`, live.developing);
+      await p.close();
+    }
+
+    // Home's spacing: with no Developing section Latest starts at the top of the main column; below Developing it keeps its gap.
+    // One evaluate hides Developing, reads, and shows it again.
+    {
+      const p = await open("home");
+      await p.waitForSelector('#feed [data-article="e2e-article"]', { timeout: 5000 }).catch(() => {});
+      const gap = await p.evaluate(() => {
+        const feedSec = document.getElementById("feedSec"), pinsSec = document.getElementById("pinsSec");
+        const both = parseFloat(getComputedStyle(feedSec).marginTop);
+        pinsSec.hidden = true;
+        const margin = getComputedStyle(feedSec).marginTop;
+        const top = feedSec.getBoundingClientRect().top;
+        const mainTop = document.querySelector(".home-main").getBoundingClientRect().top;
+        pinsSec.hidden = false;
+        return { both, margin, top, mainTop };
+      });
+      ok(gap.margin === "0px" && Math.abs(gap.top - gap.mainTop) <= 1, `${label}: with no Developing section, Latest starts at the top of the column`, `margin ${gap.margin}, top ${gap.top} vs ${gap.mainTop}`);
+      ok(gap.both > 0, `${label}: below Developing, Latest keeps its gap`, `${gap.both}px`);
       await p.close();
     }
 
@@ -375,6 +535,24 @@ try {
       await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
       const fits = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: innerWidth }));
       ok(fits.scroll <= fits.inner, `${label}: Home fits the phone's width, with no sideways scroll`, `${fits.scroll}px in ${fits.inner}px`);
+      await p.close();
+    }
+
+    // Home with its "Right now" rail really filled (nothing forced): no sideways scroll, and every rail row on two lines,
+    // its label and time first and its headline below. Read-only.
+    if (width === 1280) {
+      const p = await open("home");
+      await p.waitForFunction(() => document.querySelectorAll("#railBody h3").length === 3, { timeout: 10000 }).catch(() => {});
+      const filled = await p.evaluate(() => ({
+        heads: document.querySelectorAll("#railBody h3").length,
+        scroll: document.documentElement.scrollWidth, inner: innerWidth,
+        rows: [...document.querySelectorAll("#railBody .feed-row")].map(row => {
+          const tt = row.querySelector(".tt"), pill = row.querySelector(".pill");
+          return !!tt && !!pill && tt.getBoundingClientRect().top >= pill.getBoundingClientRect().bottom - 1;
+        }),
+      }));
+      ok(filled.heads === 3 && filled.scroll <= filled.inner, `${label}: Home with its rail filled doesn't scroll sideways`, `${filled.heads} heads, ${filled.scroll}px in ${filled.inner}px`);
+      ok(filled.rows.length >= 3 && filled.rows.every(Boolean), `${label}: each rail row puts its headline below its label`, `${filled.rows.filter(Boolean).length} of ${filled.rows.length} rows`);
       await p.close();
     }
 
@@ -453,6 +631,18 @@ try {
       ok(rail.left >= main.right - 1, "1024: the rail sits to the right of the main column", `${rail.left} vs ${main.right}`);
       ok(Math.abs(rail.width - 320) <= 0.5, "1024: the rail is 320px wide", `${rail.width}px`);
       ok(!wide, "1024: Home with the rail doesn't scroll sideways");
+      await p.close();
+    }
+
+    // At 1024 with the rail really filled (nothing forced), the page doesn't scroll sideways. Read-only.
+    {
+      const p = await openAt(1024, "home");
+      await p.waitForFunction(() => document.querySelectorAll("#railBody h3").length === 3, { timeout: 10000 }).catch(() => {});
+      const filled = await p.evaluate(() => ({
+        heads: document.querySelectorAll("#railBody h3").length,
+        scroll: document.documentElement.scrollWidth, inner: innerWidth,
+      }));
+      ok(filled.heads === 3 && filled.scroll <= filled.inner, "1024: Home with its rail filled doesn't scroll sideways", `${filled.heads} heads, ${filled.scroll}px in ${filled.inner}px`);
       await p.close();
     }
   }

@@ -42,7 +42,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- Seed: routes.mjs's rows, copied verbatim ----------
 const STORIES = [
-  { id: "e2e-developing", kind: "article", stage: "developing", headline: "A story still developing", list: "home", cards: "#devCards", chat: true },
+  { id: "e2e-developing", kind: "article", stage: "developing", headline: "A story still developing", list: "home", cards: "#pins", chat: true },
   { id: "e2e-article", kind: "article", stage: "archived", headline: "A story that has settled", list: "articles", cards: "#articles", chat: false },
   { id: "e2e-notice", kind: "notice", stage: "developing", headline: "A notice about a road", list: "notices", cards: "#notices", chat: false },
 ];
