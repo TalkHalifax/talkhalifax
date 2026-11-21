@@ -36,7 +36,8 @@ You review in the worktree where the branch is already checked out.
 
 1. Show stories and notices exactly as the API returns them: never invent or reword facts. Order only by the API's own
    fields: developing stories pinned first, then the other stories as the feed, each newest update first; beside
-   them, urgent notices or, when none is urgent, the latest notices, newest first.
+   them, notices: the urgent ones first, then the most recent, each newest first, leaving out the one the alert bar
+   already shows.
 2. The home page must work offline.
 3. Don't add requests: use the data the app shell already loads.
 4. Check phone and desktop widths, and reduced motion.
