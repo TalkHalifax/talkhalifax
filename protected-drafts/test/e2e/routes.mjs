@@ -357,6 +357,9 @@ try {
       ok(home.bars.includes("Wind warning in effect"), `${label}: the weather warning is in the alert bar`, home.bars);
       ok(JSON.stringify(home.noticeIds) === JSON.stringify(["hw-e2e-boil"]) && home.noticeHref === "#article-hw-e2e-boil", `${label}: with an urgent notice, the rail shows only it`, `${home.noticeIds.join(", ")} ${home.noticeHref}`);
       ok(home.more && home.moreText === "All notices", `${label}: the rail links to All notices`, home.moreText);
+      // All notices is a finger-sized target: 44px tall at least
+      const moreH = await p.evaluate(() => Math.round(document.querySelector("#railBody a.more")?.getBoundingClientRect().height ?? 0));
+      ok(moreH >= 44, `${label}: All notices is a 44px tap target`, `${moreH}px`);
 
       // #62 T3: no heading shows above Home's Developing section
       {
@@ -429,6 +432,41 @@ try {
       await p.close();
     }
 
+    // Home's rail when the weather comes last: watches and notices show first, and the weather joins them when it lands,
+    // without waiting for the next stories or alerts refresh. The weather request is held back until the rest is in.
+    // Interception has to be on before the page loads, so this page is set up by hand rather than with open().
+    {
+      const p = await browser.newPage();
+      p.on("pageerror", e => errors.push(`${label} #home (held weather): ${e.message}`));
+      await p.setViewport({ width, height, isMobile: width < 500, hasTouch: width < 500 });
+      await p.setBypassServiceWorker(true); // sw.js caches /api/weather, which would answer without a request
+      await p.setRequestInterception(true);
+      let held = null, stories = 0, alerts = 0;
+      p.on("request", r => {
+        let path = "";
+        try { path = new URL(r.url()).pathname; } catch { /* not a URL: let it through */ }
+        if (path === "/api/weather" && !held) { held = r; return; }
+        if (path === "/api/stories") stories++;
+        if (path === "/api/alerts") alerts++;
+        r.continue().catch(() => {});
+      });
+      await p.goto(`${B}/#home`, { waitUntil: "load" });
+      await p.waitForFunction(() => JSON.stringify([...document.querySelectorAll("#railBody h3")].map(h => h.textContent.trim())) === JSON.stringify(["Weather watches and statements", "Notices"])
+        && !!document.querySelector('#pins [data-article="e2e-developing"]'), { timeout: 10000 }).catch(() => {});
+      const before = await p.evaluate(() => JSON.stringify([...document.querySelectorAll("#railBody h3")].map(h => h.textContent.trim())));
+      ok(!!held && before === JSON.stringify(["Weather watches and statements", "Notices"]), `${label}: with the weather held back, the rail shows watches and notices first`, `${held ? "held" : "not held"}; ${before}`);
+      const counts = { stories, alerts };
+      await held?.continue().catch(() => {});
+      await p.waitForFunction(() => document.querySelector("#railBody h3")?.textContent.trim() === "Weather" && [...document.querySelectorAll("#railBody .feed-row")].some(r => r.textContent.includes("15°C")), { timeout: 5000 }).catch(() => {});
+      const after = await p.evaluate(() => ({
+        first: document.querySelector("#railBody h3")?.textContent.trim() ?? "",
+        wx: [...document.querySelectorAll("#railBody .feed-row")].some(r => r.textContent.includes("15°C")),
+      }));
+      ok(after.first === "Weather" && after.wx && stories === counts.stories && alerts === counts.alerts, `${label}: when the weather arrives last, the rail adds it without waiting for a refresh`,
+        `first head ${after.first}; ${after.wx ? "" : "no "}15°C row; stories ${counts.stories}->${stories}, alerts ${counts.alerts}->${alerts}`);
+      await p.close();
+    }
+
     // #62 T4: LIVE follows content: the Developing head says LIVE only once a story still developing is in its section
     {
       const p = await open("home");
@@ -451,6 +489,26 @@ try {
       ok(quiet(live.shown), `${label}: nor once the section shows with no stories in it`, live.shown);
       ok(quiet(live.settled), `${label}: nor with only a settled story in it`, live.settled);
       ok(live.developing === '"LIVE"', `${label}: it says LIVE once a developing story is in it`, live.developing);
+      await p.close();
+    }
+
+    // Home's spacing: with no Developing section Latest starts at the top of the main column; below Developing it keeps its gap.
+    // One evaluate hides Developing, reads, and shows it again.
+    {
+      const p = await open("home");
+      await p.waitForSelector('#feed [data-article="e2e-article"]', { timeout: 5000 }).catch(() => {});
+      const gap = await p.evaluate(() => {
+        const feedSec = document.getElementById("feedSec"), pinsSec = document.getElementById("pinsSec");
+        const both = parseFloat(getComputedStyle(feedSec).marginTop);
+        pinsSec.hidden = true;
+        const margin = getComputedStyle(feedSec).marginTop;
+        const top = feedSec.getBoundingClientRect().top;
+        const mainTop = document.querySelector(".home-main").getBoundingClientRect().top;
+        pinsSec.hidden = false;
+        return { both, margin, top, mainTop };
+      });
+      ok(gap.margin === "0px" && Math.abs(gap.top - gap.mainTop) <= 1, `${label}: with no Developing section, Latest starts at the top of the column`, `margin ${gap.margin}, top ${gap.top} vs ${gap.mainTop}`);
+      ok(gap.both > 0, `${label}: below Developing, Latest keeps its gap`, `${gap.both}px`);
       await p.close();
     }
 
@@ -477,6 +535,24 @@ try {
       await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
       const fits = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: innerWidth }));
       ok(fits.scroll <= fits.inner, `${label}: Home fits the phone's width, with no sideways scroll`, `${fits.scroll}px in ${fits.inner}px`);
+      await p.close();
+    }
+
+    // Home with its "Right now" rail really filled (nothing forced): no sideways scroll, and every rail row on two lines,
+    // its label and time first and its headline below. Read-only.
+    if (width === 1280) {
+      const p = await open("home");
+      await p.waitForFunction(() => document.querySelectorAll("#railBody h3").length === 3, { timeout: 10000 }).catch(() => {});
+      const filled = await p.evaluate(() => ({
+        heads: document.querySelectorAll("#railBody h3").length,
+        scroll: document.documentElement.scrollWidth, inner: innerWidth,
+        rows: [...document.querySelectorAll("#railBody .feed-row")].map(row => {
+          const tt = row.querySelector(".tt"), pill = row.querySelector(".pill");
+          return !!tt && !!pill && tt.getBoundingClientRect().top >= pill.getBoundingClientRect().bottom - 1;
+        }),
+      }));
+      ok(filled.heads === 3 && filled.scroll <= filled.inner, `${label}: Home with its rail filled doesn't scroll sideways`, `${filled.heads} heads, ${filled.scroll}px in ${filled.inner}px`);
+      ok(filled.rows.length >= 3 && filled.rows.every(Boolean), `${label}: each rail row puts its headline below its label`, `${filled.rows.filter(Boolean).length} of ${filled.rows.length} rows`);
       await p.close();
     }
 
@@ -555,6 +631,18 @@ try {
       ok(rail.left >= main.right - 1, "1024: the rail sits to the right of the main column", `${rail.left} vs ${main.right}`);
       ok(Math.abs(rail.width - 320) <= 0.5, "1024: the rail is 320px wide", `${rail.width}px`);
       ok(!wide, "1024: Home with the rail doesn't scroll sideways");
+      await p.close();
+    }
+
+    // At 1024 with the rail really filled (nothing forced), the page doesn't scroll sideways. Read-only.
+    {
+      const p = await openAt(1024, "home");
+      await p.waitForFunction(() => document.querySelectorAll("#railBody h3").length === 3, { timeout: 10000 }).catch(() => {});
+      const filled = await p.evaluate(() => ({
+        heads: document.querySelectorAll("#railBody h3").length,
+        scroll: document.documentElement.scrollWidth, inner: innerWidth,
+      }));
+      ok(filled.heads === 3 && filled.scroll <= filled.inner, "1024: Home with its rail filled doesn't scroll sideways", `${filled.heads} heads, ${filled.scroll}px in ${filled.inner}px`);
       await p.close();
     }
   }
