@@ -98,9 +98,10 @@ header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-cont
 .more:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* Home: a front page plus feed. Developing pins, Latest, and a "Right now" side column at 1024px and up.
-   Each region stays hidden until Home fills it; #devCards holds pins and feed together until then. */
+   Each region stays hidden until Home fills it: pins in #pins, the feed in #feed, the rail in #homeRail / #railBody.
+   Regions sit 36px apart, counting only the ones showing, so a hidden region never pushes the next one down. */
 .home-grid { max-width: var(--page-max); margin-inline: auto; }
-.home-main > * + * { margin-top: 36px; }
+.home-main > :not([hidden]) ~ :not([hidden]) { margin-top: 36px; }
 .home-rail { margin-top: 36px; }
 @media (min-width: 1024px) {
   .home-grid { display: flex; align-items: flex-start; gap: 32px; }
@@ -125,6 +126,15 @@ header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-cont
   .feed-row { grid-template-columns: auto 1fr; grid-template-areas: "type stamp" "title title"; }
   .feed-row .stamp { justify-self: end; }
 }
+/* Right now rail: Inter sub-heads over each block, 24px between blocks */
+.rail-body > h3 { margin: 24px 0 8px; font-family: var(--f-body); font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: 0; color: var(--ink); }
+.rail-body > h3:first-child { margin-top: 0; }
+/* Rail rows mirror the ≤560px feed template above at every width: type and stamp, headline below */
+.rail-body .feed-row { grid-template-columns: auto 1fr; grid-template-areas: "type stamp" "title title"; }
+.rail-body .feed-row .stamp { justify-self: end; }
+/* All notices: a 44px target; .more's all: unset wipes the global focus ring, so it brings its own */
+.rail-body .more { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; margin-top: 4px; }
+.rail-body .more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-s); }
 .stamp { font-family: var(--f-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-muted); white-space: nowrap; }
 .forum-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
 .forum-top h1 { font-family: var(--f-display); font-weight: 700; font-size: 32px; line-height: 1.08; letter-spacing: -.025em; margin: 0; }
@@ -487,7 +497,7 @@ header .wx:not([hidden]) + .hnav { margin-left: 0; }
 @keyframes dr-out { to { transform: translateX(100%); } }
 @keyframes dr-fade { from { opacity: 0; } }
 @keyframes dr-fade-out { to { opacity: 0; } }
-#devCards, #pins, #feed { position: relative; }
+#pins, #feed { position: relative; }
 .card.ghost { position: absolute; margin: 0; pointer-events: none; z-index: 1; }
 /* LIVE sits in a 12px label head, and only when its section holds a developing card */
 .live-h { display: flex; align-items: center; gap: 10px; }
