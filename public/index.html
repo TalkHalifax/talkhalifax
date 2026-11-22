@@ -44,8 +44,13 @@
 <main>
   <section class="view wrap" id="home">
     <h1 class="sr">Developing and latest stories</h1>
+    <div class="nfilters home-tabs" id="homeTabs" role="tablist" aria-label="Home sections" hidden>
+      <button type="button" role="tab" data-tab="all" aria-selected="true" aria-controls="homeMain">All</button>
+      <button type="button" role="tab" data-tab="news" aria-selected="false" aria-controls="homeMain">News</button>
+      <button type="button" role="tab" data-tab="notices" aria-selected="false" aria-controls="homeRail">Notices</button>
+    </div>
     <div class="home-grid">
-      <div class="home-main">
+      <div class="home-main" id="homeMain" role="tabpanel">
         <section class="home-sec" id="pinsSec" hidden>
           <div class="sec-head"><h2 class="live-h" id="pinsH">Developing</h2><span class="sec-count" id="pinsCount"></span></div>
           <div class="cards" id="pins"></div>
@@ -55,7 +60,7 @@
           <div class="feed" id="feed"></div>
         </section>
       </div>
-      <aside class="home-rail" id="homeRail" aria-labelledby="railH" hidden>
+      <aside class="home-rail" id="homeRail" role="tabpanel" aria-labelledby="railH" hidden>
         <div class="sec-head"><h2 id="railH">Right now</h2></div>
         <div class="rail-body" id="railBody"></div>
       </aside>
