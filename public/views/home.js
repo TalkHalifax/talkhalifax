@@ -163,6 +163,7 @@ let homeTab = "all";
 function applyTab(focus) {
   const home = $("#home");
   if (home) home.dataset.tab = homeTab;
+  applyPanels();
   const box = $("#homeTabs");
   if (!box) return;
   for (const btn of box.querySelectorAll('[role="tab"]')) {
@@ -171,6 +172,37 @@ function applyTab(focus) {
     btn.tabIndex = on ? 0 : -1;
     if (on && focus) btn.focus();
   }
+}
+
+// The tab panel roles apply only where the tabs show (below 1024px); on desktop the aside stays a plain landmark
+const PHONE = typeof matchMedia === "function" ? matchMedia("(max-width: 1023.98px)") : null;
+/** Each panel's own aria-labelledby from the markup (the aside's is its "Right now" head), put back off phone widths. */
+const ownLabel = new WeakMap();
+
+/** On phone widths, #homeMain and #homeRail are tab panels labelled by their tabs; otherwise neither has the role. */
+function applyPanels() {
+  const box = $("#homeTabs");
+  const tabs = box ? [...box.querySelectorAll('[role="tab"]')] : [];
+  for (const btn of tabs) if (!btn.id && btn.dataset.tab) btn.id = "homeTab-" + btn.dataset.tab;
+  const tabId = name => { const b = tabs.find(x => x.dataset.tab === name); return b && b.id ? b.id : ""; };
+  const main = $("#homeMain") || $("#home .home-main"), rail = $("#homeRail");
+  const phone = !!(PHONE && PHONE.matches);
+  const set = (el, tabLabel) => {
+    if (!el) return;
+    if (!ownLabel.has(el)) ownLabel.set(el, el.getAttribute("aria-labelledby") || "");
+    const label = (phone && tabLabel) || ownLabel.get(el);
+    if (phone) el.setAttribute("role", "tabpanel");
+    else el.removeAttribute("role");
+    if (label) el.setAttribute("aria-labelledby", label);
+    else el.removeAttribute("aria-labelledby"); // a label pointing at nothing is worse than none
+  };
+  set(main, tabId(homeTab === "all" || homeTab === "news" ? homeTab : "all"));
+  set(rail, tabId("notices"));
+}
+
+if (PHONE) {
+  if (typeof PHONE.addEventListener === "function") PHONE.addEventListener("change", applyPanels);
+  else if (typeof PHONE.addListener === "function") PHONE.addListener(applyPanels);
 }
 
 function selectTab(tab, focus) {
