@@ -52,7 +52,7 @@ function barItems() {
  *  Everything else is on the Notices page. */
 function renderBanners() {
   const items = barItems();
-  renderRail(items[0]); // loadAlerts and show() call only this, so the column stays current with the bar
+  renderRail(items); // loadAlerts and show() call only this, so the column stays current with the bar
   const el = $("#abars");
   el.hidden = S.current !== "home" || !items.length;
   if (el.hidden) { el.innerHTML = ""; return; }
@@ -99,16 +99,15 @@ function railWatches() {
   return `<h3>Weather watches and statements</h3><div class="feed">${rows}</div>`;
 }
 
-/** City notices without repeating the alert bar (the editor's decision 3): the bar's lead notice is left out, then the
- *  remaining urgent notices come first, newest first, filled with the latest of the rest, up to RAIL_NOTICES. When the
- *  lead is a weather warning, no notice is left out. Urgent notices folded behind the bar's "+N more" may show here:
- *  only the lead is on the bar. */
-function railNotices(lead) {
+/** City notices without repeating the alert bar (the editor's decision): every notice on the bar, folded behind
+ *  "+N more" or not, is left out; then the remaining urgent notices come first, newest first, filled with the latest
+ *  of the rest, up to RAIL_NOTICES (3). Weather warnings on the bar leave no notice out. */
+function railNotices(barList) {
   if (!S.stories) return "";
-  const skip = lead && lead.rank === 1 ? lead.id : null;
-  const urgent = urgentNotices().filter(n => n.id !== skip);
+  const skip = new Set((barList || []).filter(b => b.rank === 1).map(b => b.id));
+  const urgent = urgentNotices().filter(n => !skip.has(n.id));
   const ids = new Set(urgent.map(n => n.id));
-  const rest = S.stories.filter(n => n.kind === "notice" && n.id !== skip && !ids.has(n.id)).sort(byPublished);
+  const rest = S.stories.filter(n => n.kind === "notice" && !skip.has(n.id) && !ids.has(n.id)).sort(byPublished);
   const picked = urgent.concat(rest).slice(0, RAIL_NOTICES);
   if (!picked.length) return "";
   const rows = picked.map(n => `<a class="feed-row" href="#article-${esc(n.id)}" data-article="${esc(n.id)}"><span class="pill">${esc(noticeLabel(n))}</span><span class="tt">${esc(n.headline)}</span><time class="stamp"${dt(n.publishedAt)}>${esc(when(n.publishedAt))}</time></a>`).join("");
@@ -118,11 +117,11 @@ function railNotices(lead) {
 const RAIL_EMPTY = '<div class="msg">Nothing right now.</div><a class="more" href="#notices" data-go="notices">All notices</a>';
 
 /** The "Right now" column: weather, then watches and statements, then notices, leaving out any that are empty.
- *  `lead` is the alert bar's first item, which the notices leave out. */
-function renderRail(lead) {
+ *  `barList` is the alert bar's whole list, folded or not; the notices leave out every notice in it. */
+function renderRail(barList) {
   const rail = $("#homeRail"), body = $("#railBody");
   if (!rail || !body) return;
-  const html = railWeather() + railWatches() + railNotices(lead);
+  const html = railWeather() + railWatches() + railNotices(barList);
   if (html) { rail.hidden = false; setCards(body, html); }
   // Once stories have loaded, the column (the phone's Notices tab) is never blank
   else if (S.stories) { rail.hidden = false; setCards(body, RAIL_EMPTY); }
