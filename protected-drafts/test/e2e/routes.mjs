@@ -493,10 +493,10 @@ try {
         let s = await state();
         ok(s.unhidden && s.shown && s.sizes.length === 3 && s.sizes.every(n => n >= 44), `${label}: Home's three tabs show once the stories load, each a 44px tap target`, `${s.sizes.join(", ")}px`);
         ok(s.tab === "all" && s.selected === "all" && s.zero === "all", `${label}: Home opens on All, the one selected tab`, `${s.tab} | ${s.selected} | ${s.zero}`);
-        let why = await chooseTab(p, "news"); s = await state();
+        const newsWhy = await chooseTab(p, "news"); s = await state();
         const newsPanel = s.mainPanel;
-        ok(!why && s.tab === "news" && s.selected === "news" && s.zero === "news" && s.main && !s.rail && s.hash === "#home", `${label}: News is selected on click and shows the main column, not the rail`, why || JSON.stringify(s));
-        why = await chooseTab(p, "notices"); s = await state();
+        ok(!newsWhy && s.tab === "news" && s.selected === "news" && s.zero === "news" && s.main && !s.rail && s.hash === "#home", `${label}: News is selected on click and shows the main column, not the rail`, newsWhy || JSON.stringify(s));
+        let why = await chooseTab(p, "notices"); s = await state();
         ok(!why && s.tab === "notices" && s.selected === "notices" && s.zero === "notices" && !s.main && s.rail && s.hash === "#home", `${label}: Notices is selected on click and shows only the rail`, why || JSON.stringify(s));
         why = await chooseTab(p, "all"); s = await state();
         ok(!why && s.tab === "all" && s.selected === "all" && s.zero === "all" && s.main && !s.rail && s.hash === "#home", `${label}: All is selected on click and brings the main column back`, why || JSON.stringify(s));
@@ -505,7 +505,7 @@ try {
         ok(!why && s.selected === "news" && s.zero === "news" && s.focus === "news", `${label}: ArrowRight moves to the next tab, focused and selected`, why || JSON.stringify(s));
         why = (await press("ArrowRight", "notices")) || (await press("ArrowRight", "all")) || (await press("ArrowLeft", "notices")); s = await state();
         ok(!why && s.tab === "notices" && s.selected === "notices" && s.zero === "notices" && s.focus === "notices", `${label}: the arrow keys wrap around the tabs, both ways`, why || JSON.stringify(s));
-        ok(newsPanel === "tabpanel homeTab-news" && s.mainPanel === "tabpanel homeTab-all", `${label}: the main column is a tab panel labelled by the selected All or News tab`, `${newsPanel} | ${s.mainPanel}`);
+        ok(!newsWhy && !why && s.tab === "notices" && newsPanel === "tabpanel homeTab-news" && s.mainPanel === "tabpanel homeTab-all", `${label}: the main column is a tab panel labelled by the selected All or News tab`, newsWhy || why || `${newsPanel} | ${s.mainPanel}`);
       } else {
         const s = await state("notices");
         ok(s.unhidden && !s.shown, `${label}: Home's tabs are hidden at 1024px and up`, s.sizes.join(", "));
