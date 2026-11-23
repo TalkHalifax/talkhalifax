@@ -597,6 +597,28 @@ header .wx:not([hidden]) + .hnav { margin-left: 0; }
 .nfilters button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface-page); }
 .nfilters button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .nfilters .c { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; opacity: .75; }
+/* Home tabs (All, News, Notices): the filter chips at 44px, below 1024px only. Home's JS removes hidden and sets
+   #home[data-tab]; Notices swaps the main column for "Right now". Selected stays ink-filled on hover. */
+.home-tabs { margin: 0 0 20px; }
+.home-tabs button { min-height: 44px; min-width: 44px; }
+.home-tabs button[aria-selected="true"], .home-tabs button[aria-selected="true"]:hover { background: var(--ink); border-color: var(--ink); color: var(--surface-page); }
+@media (min-width: 1024px) { .home-tabs { display: none; } }
+@media (max-width: 1023.98px) {
+  #home[data-tab="notices"] .home-main { display: none; }
+  #home:not([data-tab="notices"]) #homeRail { display: none; }
+  #home[data-tab="notices"] #homeRail { margin-top: 0; }
+}
+/* Developing below 760px: a sideways swipe row, each card about 85% wide so the next one peeks in.
+   Only #pins scrolls; the 6px padding keeps card shadows and focus rings from being clipped. */
+@media (max-width: 759.98px) {
+  #pins { display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
+          padding: 6px; margin: -6px; scroll-padding-inline: 6px; }
+  #pins > .card { flex: 0 0 85%; min-width: 0; scroll-snap-align: start; }
+  #pins > .msg { flex: 1 0 100%; }
+}
+@media (max-width: 759.98px) and (prefers-reduced-motion: reduce) {
+  #pins { scroll-behavior: auto; scroll-snap-type: none; }
+}
 .ncards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
 .ncard { --sev: var(--signal-ok); all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 16px 18px 14px; border-radius: var(--radius-l);
   background: color-mix(in srgb, var(--sev) 12%, var(--surface-page)); border: 1px solid color-mix(in srgb, var(--sev) 18%, transparent); }

@@ -128,6 +128,46 @@ try {
     const box = sel => { const r = document.querySelector(sel).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width }; };
     return { grid: box("#home .home-grid"), main: box("#home .home-main"), rail: box("#homeRail"), wide: document.documentElement.scrollWidth > innerWidth };
   }, showRail);
+  // #64: a click that can't stop the run. Returns "" once the element is shown and clicked, or why not; the check that
+  // follows folds the reason into its FAIL, so a missing or hidden element is a failed check, never a thrown error.
+  const tryClick = async (p, sel) => {
+    try {
+      const el = await p.waitForSelector(sel, { visible: true, timeout: 5000 });
+      await el.evaluate(e => e.scrollIntoView({ block: "center" }));
+      await el.click();
+      return "";
+    } catch (e) { return `couldn't click ${sel}: ${String(e?.message ?? e).split("\n")[0]}`; }
+  };
+  // #64: choose one of Home's phone tabs by clicking it, then wait until #home and the tab say so (never a bare read)
+  const chooseTab = async (p, tab) => {
+    const why = await tryClick(p, `#homeTabs [role="tab"][data-tab="${tab}"]`);
+    if (why) return why;
+    return p.waitForFunction(t => document.getElementById("home")?.dataset.tab === t && document.querySelector(`#homeTabs [data-tab="${t}"]`)?.getAttribute("aria-selected") === "true", { timeout: 5000 }, tab)
+      .then(() => "", () => `the ${tab} tab didn't take`);
+  };
+  // #64: a key press that can't stop the run, like tryClick
+  const tryPress = (p, key) => p.keyboard.press(key).then(() => "", e => `couldn't press ${key}: ${String(e?.message ?? e).split("\n")[0]}`);
+  // #64: Developing's swipe row below 760px. One evaluate reads the row, scrolls it to its end and reads the page again
+  // a moment later, so the change and the reads go together. Three checks.
+  const checkSwipe = async (p, tag) => {
+    const s = await p.evaluate(async () => {
+      const pins = document.getElementById("pins"), cs = getComputedStyle(pins);
+      const cards = [...pins.querySelectorAll(":scope > .card[data-article]")];
+      const inner = pins.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const page = () => ({ fits: document.documentElement.scrollWidth <= innerWidth, x: scrollX });
+      const out = { display: cs.display, overflowX: cs.overflowX, snap: cs.scrollSnapType, cards: cards.length,
+        aligns: cards.map(c => getComputedStyle(c).scrollSnapAlign), leadFirst: !!pins.firstElementChild?.matches(".card.lead"),
+        widths: cards.map(c => c.getBoundingClientRect().width / inner),
+        peeks: (cards[1]?.getBoundingClientRect().left ?? Infinity) < pins.getBoundingClientRect().right,
+        overflows: pins.scrollWidth > pins.clientWidth, before: page() };
+      pins.scrollLeft = pins.scrollWidth;
+      await new Promise(r => setTimeout(r, 250));
+      return { ...out, scrolled: pins.scrollLeft, after: page() };
+    });
+    ok(s.display === "flex" && s.overflowX === "auto" && s.snap === "x mandatory" && s.cards === 3 && s.aligns.every(a => a === "start") && s.leadFirst, `${tag}: Developing is a sideways swipe row that snaps, lead first`, `${s.display}, ${s.overflowX}, ${s.snap}, ${s.cards} cards, ${s.aligns.join("/")}`);
+    ok(s.widths.length === 3 && s.widths.every(w => w >= 0.8 && w <= 0.9) && s.peeks && s.overflows, `${tag}: each swipe card is about 85% wide and the next one peeks in`, s.widths.map(w => w.toFixed(2)).join(", "));
+    ok(s.before.fits && s.before.x === 0 && s.scrolled > 0 && s.after.fits && s.after.x === 0, `${tag}: scrolling the swipe row to its end scrolls only the row, never the page`, JSON.stringify({ before: s.before, after: s.after, scrolled: s.scrolled }));
+  };
 
   for (const [width, height, label] of [[1280, 900, "desktop"], [375, 812, "phone"]]) {
     const open = async hash => {
@@ -273,17 +313,17 @@ try {
       // #62 T1: Home has its grid, its Developing and Latest sections, a labelled "Right now" side column, and their heads
       {
         ok(await view(p) === "home", `${label}: Home shows the home view`);
-        const has = await p.evaluate(() => ({
+        const has = await p.evaluate(w => ({
           grid: !!document.querySelector("#home .home-grid"),
           pins: !!document.querySelector("#home #pinsSec #pins"),
           feed: !!document.querySelector("#home #feedSec #feed"),
-          rail: !!document.querySelector('aside#homeRail[aria-labelledby="railH"]'),
+          rail: w < 1024 ? !!document.querySelector('aside#homeRail[role="tabpanel"][aria-labelledby="homeTab-notices"]') && !!document.querySelector('#homeTabs > [role="tab"][data-tab="notices"]#homeTab-notices') : !!document.querySelector('aside#homeRail[aria-labelledby="railH"]'),
           heads: ["railH", "pinsH", "feedH"].map(id => document.getElementById(id)?.textContent.trim() ?? ""),
-        }));
+        }), width);
         ok(has.grid, `${label}: Home has its grid`);
         ok(has.pins, `${label}: Home has a Developing section with a place for its cards`);
         ok(has.feed, `${label}: Home has a Latest section with a place for its feed`);
-        ok(has.rail, `${label}: Home has a side column labelled by its head`);
+        ok(has.rail, `${label}: Home has a side column labelled by ${width < 1024 ? "its Notices tab" : "its head"}`);
         ok(has.heads[0] === "Right now", `${label}: the side column's head reads Right now`, has.heads[0]);
         ok(has.heads[1] === "Developing", `${label}: the Developing section's head reads Developing`, has.heads[1]);
         ok(has.heads[2] === "Latest", `${label}: the Latest section's head reads Latest`, has.heads[2]);
@@ -339,7 +379,6 @@ try {
       });
       ok(home.pins, `${label}: the Developing section shows once Home fills it`);
       ok(home.feed, `${label}: the Latest section shows once Home fills it`);
-      ok(home.rail, `${label}: the Right now column shows once Home fills it`);
       ok(home.devGone, `${label}: #devCards is gone from Home`);
       ok(JSON.stringify(home.pinIds) === JSON.stringify(["e2e-developing", "e2e-new", "e2e-old"]), `${label}: Developing pins the three developing stories`, home.pinIds.join(", "));
       ok(home.leads === 1 && home.leadFirst, `${label}: exactly one pin is the lead, and it comes first`, `${home.leads} lead`);
@@ -355,11 +394,7 @@ try {
       ok(home.wx && home.wxText.includes("15°C") && home.wxText.includes("Sunny") && home.wxAbout.includes("feels like 15°C"), `${label}: the rail's weather row links to Environment Canada`, `${home.wxText.trim()} | ${home.wxAbout}`);
       ok(home.railText.includes("Rainfall watch in effect") && !home.railText.includes("Wind warning in effect"), `${label}: the rail lists the weather watch, not the warning`);
       ok(home.bars.includes("Wind warning in effect"), `${label}: the weather warning is in the alert bar`, home.bars);
-      ok(JSON.stringify(home.noticeIds) === JSON.stringify(["hw-e2e-boil"]) && home.noticeHref === "#article-hw-e2e-boil", `${label}: with an urgent notice, the rail shows only it`, `${home.noticeIds.join(", ")} ${home.noticeHref}`);
       ok(home.more && home.moreText === "All notices", `${label}: the rail links to All notices`, home.moreText);
-      // All notices is a finger-sized target: 44px tall at least
-      const moreH = await p.evaluate(() => Math.round(document.querySelector("#railBody a.more")?.getBoundingClientRect().height ?? 0));
-      ok(moreH >= 44, `${label}: All notices is a 44px tap target`, `${moreH}px`);
 
       // #62 T3: no heading shows above Home's Developing section
       {
@@ -373,9 +408,30 @@ try {
         ok(!above.length, `${label}: no heading shows above Home's Developing section`, above.join(" | "));
       }
 
+      // #64: below 1024px "Right now" is the Notices tab's panel, so the rail's own checks choose Notices first
+      const railTab = width < 1024 ? await chooseTab(p, "notices") : "";
+      const railBox = await p.evaluate(() => {
+        const el = document.getElementById("homeRail");
+        return { shown: !!el && el.hidden === false && el.getBoundingClientRect().height > 0,
+          moreH: Math.round(document.querySelector("#railBody a.more")?.getBoundingClientRect().height ?? 0) };
+      });
+      ok(!railTab && railBox.shown, `${label}: the Right now column shows once Home fills it`, railTab);
+      // All notices is a finger-sized target: 44px tall at least
+      ok(!railTab && railBox.moreH >= 44, `${label}: All notices is a 44px tap target`, railTab || `${railBox.moreH}px`);
+
       // The alert bar folds the boil-water advisory behind the wind warning; opening it shows the advisory
       await p.evaluate(() => document.getElementById("abarMore")?.click());
       ok((await p.evaluate(() => document.getElementById("abars").innerText)).includes("Boil Water Advisory"), `${label}: the alert bar still shows the boil-water advisory`);
+      // #64: the rail never repeats the alert bar. With the bar opened every notice it holds is in #abars; the rail shows the
+      // seeded notices the bar doesn't hold (their order isn't fixed: the seed gives them one time), each linking to its story
+      await p.waitForFunction(() => !!document.querySelector('#abars [data-article="hw-e2e-boil"]'), { timeout: 5000 }).catch(() => {});
+      const noRepeat = await p.evaluate(() => {
+        const rows = [...document.querySelectorAll("#railBody a.feed-row[data-article]")];
+        return { ids: rows.map(a => a.dataset.article), hrefs: rows.every(a => a.getAttribute("href") === `#article-${a.dataset.article}`),
+          bar: [...document.querySelectorAll("#abars [data-article]")].map(a => a.dataset.article) };
+      });
+      ok(JSON.stringify([...noRepeat.ids].sort()) === JSON.stringify(["e2e-notice", "hw-e2e-changed", "hw-e2e-shutoff"]) && noRepeat.hrefs, `${label}: the rail shows the notices the alert bar doesn't hold`, noRepeat.ids.join(", "));
+      ok(noRepeat.bar.includes("hw-e2e-boil") && noRepeat.ids.length > 0 && noRepeat.ids.every(id => !noRepeat.bar.includes(id)), `${label}: no notice in the rail is also in the alert bar`, `rail ${noRepeat.ids.join(", ")}; bar ${noRepeat.bar.join(", ")}`);
 
       // A Latest row opens its story, the way readers get there
       {
@@ -392,21 +448,69 @@ try {
         await f.close();
       }
 
-      // All notices, at the foot of the rail, opens Notices
+      // All notices, at the foot of the rail, opens Notices. Below 1024px the rail is the Notices tab's panel, so choose it
+      // first; a click that can't happen is this check's FAIL, never an error that stops the run
       {
         const n = await open("home");
         await n.waitForSelector("#railBody a.more", { timeout: 5000 }).catch(() => {});
-        const more = await n.$("#railBody a.more");
-        if (more) {
-          await more.evaluate(m => m.scrollIntoView({ block: "center" }));
-          await more.click();
-          await wait(500);
-        }
+        const why = (width < 1024 ? await chooseTab(n, "notices") : "") || await tryClick(n, "#railBody a.more");
+        if (!why) await n.waitForFunction(() => [...document.querySelectorAll("main > section.view")].filter(s => !s.hidden).map(s => s.id).join(",") === "notices", { timeout: 5000 }).catch(() => {});
         const got = await view(n);
-        ok(got === "notices", `${label}: All notices opens Notices`, got);
+        ok(!why && got === "notices", `${label}: All notices opens Notices`, why || got);
         await n.close();
       }
 
+      await p.close();
+    }
+
+    // #64: Home's tabs. Below 1024px: All, News and Notices, chosen by click or arrow keys, each showing its own panel, with no
+    // change to the address. From 1024px up: hidden, and both columns show whatever data-tab says. Each read after a click or
+    // key waits for the state it expects first.
+    {
+      const p = await open("home");
+      await p.waitForFunction(() => document.getElementById("homeTabs")?.hidden === false && !!document.querySelector("#home .card[data-article]"), { timeout: 10000 }).catch(() => {});
+      const state = force => p.evaluate(f => {
+        const home = document.getElementById("home"), box = document.getElementById("homeTabs");
+        if (f) home.dataset.tab = f;
+        const tall = el => !!el && el.getBoundingClientRect().height > 0;
+        const tabs = [...box.querySelectorAll('[role="tab"]')];
+        const main = document.getElementById("homeMain"), rail = document.getElementById("homeRail");
+        return {
+          tab: home.dataset.tab ?? "",
+          selected: tabs.filter(b => b.getAttribute("aria-selected") === "true").map(b => b.dataset.tab).join(","),
+          zero: tabs.filter(b => b.tabIndex === 0).map(b => b.dataset.tab).join(","),
+          focus: document.activeElement?.closest?.('#homeTabs [role="tab"]')?.dataset.tab ?? "",
+          unhidden: box.hidden === false, shown: tall(box),
+          sizes: tabs.map(b => { const r = b.getBoundingClientRect(); return Math.round(Math.min(r.width, r.height)); }),
+          main: tall(main), rail: tall(rail),
+          mainPanel: `${main.getAttribute("role")} ${main.getAttribute("aria-labelledby")}`,
+          railPanel: `${rail.getAttribute("role")} ${rail.getAttribute("aria-labelledby")}`,
+          hash: location.hash,
+        };
+      }, force);
+      const press = async (key, want) => (await tryPress(p, key)) || p.waitForFunction(t => document.getElementById("home").dataset.tab === t && document.activeElement?.dataset?.tab === t, { timeout: 5000 }, want).then(() => "", () => `${key} didn't move to ${want}`);
+      if (width < 1024) {
+        let s = await state();
+        ok(s.unhidden && s.shown && s.sizes.length === 3 && s.sizes.every(n => n >= 44), `${label}: Home's three tabs show once the stories load, each a 44px tap target`, `${s.sizes.join(", ")}px`);
+        ok(s.tab === "all" && s.selected === "all" && s.zero === "all", `${label}: Home opens on All, the one selected tab`, `${s.tab} | ${s.selected} | ${s.zero}`);
+        const newsWhy = await chooseTab(p, "news"); s = await state();
+        const newsPanel = s.mainPanel;
+        ok(!newsWhy && s.tab === "news" && s.selected === "news" && s.zero === "news" && s.main && !s.rail && s.hash === "#home", `${label}: News is selected on click and shows the main column, not the rail`, newsWhy || JSON.stringify(s));
+        let why = await chooseTab(p, "notices"); s = await state();
+        ok(!why && s.tab === "notices" && s.selected === "notices" && s.zero === "notices" && !s.main && s.rail && s.hash === "#home", `${label}: Notices is selected on click and shows only the rail`, why || JSON.stringify(s));
+        why = await chooseTab(p, "all"); s = await state();
+        ok(!why && s.tab === "all" && s.selected === "all" && s.zero === "all" && s.main && !s.rail && s.hash === "#home", `${label}: All is selected on click and brings the main column back`, why || JSON.stringify(s));
+        await p.evaluate(() => document.querySelector('#homeTabs [data-tab="all"]')?.focus());
+        why = await press("ArrowRight", "news"); s = await state();
+        ok(!why && s.selected === "news" && s.zero === "news" && s.focus === "news", `${label}: ArrowRight moves to the next tab, focused and selected`, why || JSON.stringify(s));
+        why = (await press("ArrowRight", "notices")) || (await press("ArrowRight", "all")) || (await press("ArrowLeft", "notices")); s = await state();
+        ok(!why && s.tab === "notices" && s.selected === "notices" && s.zero === "notices" && s.focus === "notices", `${label}: the arrow keys wrap around the tabs, both ways`, why || JSON.stringify(s));
+        ok(!newsWhy && !why && s.tab === "notices" && newsPanel === "tabpanel homeTab-news" && s.mainPanel === "tabpanel homeTab-all", `${label}: the main column is a tab panel labelled by the selected All or News tab`, newsWhy || why || `${newsPanel} | ${s.mainPanel}`);
+      } else {
+        const s = await state("notices");
+        ok(s.unhidden && !s.shown, `${label}: Home's tabs are hidden at 1024px and up`, s.sizes.join(", "));
+        ok(s.tab === "notices" && s.main && s.rail && s.mainPanel === "null null" && s.railPanel === "null railH", `${label}: both columns show whatever the tab, and neither is a tab panel`, `${s.mainPanel} | ${s.railPanel}`);
+      }
       await p.close();
     }
 
@@ -467,6 +571,36 @@ try {
       await p.close();
     }
 
+    // #64: with no weather, watches or notices, the rail says so and still links to All notices (below 1024px, under Notices).
+    // Interception has to be on before the page loads, as above.
+    {
+      const p = await browser.newPage();
+      p.on("pageerror", e => errors.push(`${label} #home (empty rail): ${e.message}`));
+      await p.setViewport({ width, height, isMobile: width < 500, hasTouch: width < 500 });
+      await p.setBypassServiceWorker(true);
+      await p.setRequestInterception(true);
+      const json = body => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      p.on("request", r => {
+        let path = "";
+        try { path = new URL(r.url()).pathname; } catch { /* not a URL: let it through */ }
+        if (path === "/api/stories") return r.respond(json({ stories: [] })).catch(() => {});
+        if (path === "/api/alerts") return r.respond(json({ alerts: { updatedAt: now, items: [] } })).catch(() => {});
+        if (path === "/api/weather") return r.respond(json({ weather: null })).catch(() => {});
+        r.continue().catch(() => {});
+      });
+      await p.goto(`${B}/#home`, { waitUntil: "load" });
+      await p.waitForFunction(() => document.querySelector("#railBody .msg")?.textContent.trim() === "Nothing right now.", { timeout: 10000 }).catch(() => {});
+      const why = width < 1024 ? await chooseTab(p, "notices") : "";
+      const empty = await p.evaluate(() => {
+        const rail = document.getElementById("homeRail"), body = document.getElementById("railBody");
+        const more = body.querySelector('a.more[href="#notices"][data-go="notices"]');
+        return { shown: rail.hidden === false && rail.getBoundingClientRect().height > 0, msg: body.querySelector(".msg")?.textContent.trim() ?? "",
+          more: more?.textContent.trim() ?? "", heads: body.querySelectorAll("h3").length, rows: body.querySelectorAll(".feed-row").length };
+      });
+      ok(!why && empty.shown && empty.msg === "Nothing right now." && empty.more === "All notices" && empty.heads === 0 && empty.rows === 0, `${label}: with nothing to show, the rail says Nothing right now. and links to All notices`, why || JSON.stringify(empty));
+      await p.close();
+    }
+
     // #62 T4: LIVE follows content: the Developing head says LIVE only once a story still developing is in its section
     {
       const p = await open("home");
@@ -512,13 +646,14 @@ try {
       await p.close();
     }
 
-    // #62 T5: on a phone the "Right now" rail sits below the main column; on desktop with no rail the main column takes the whole grid, 1200px at most
+    // #62 T5, #64: on a phone, under Notices, the "Right now" rail takes the main column's place; on desktop with no rail the main column takes the whole grid, 1200px at most
     {
       const p = await open("home");
       await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
       if (width === 375) {
-        const { main, rail } = await homeColumns(p, true);
-        ok(rail.width > 0 && rail.top >= main.bottom - 1, `${label}: the Right now rail sits below the main column`, JSON.stringify({ main, rail }));
+        const why = await chooseTab(p, "notices");
+        const { grid, main, rail } = await homeColumns(p, true);
+        ok(!why && main.width === 0 && rail.width > 0 && Math.abs(rail.top - grid.top) <= 1 && Math.abs(rail.left - grid.left) <= 1 && Math.abs(rail.width - grid.width) <= 1, `${label}: under Notices the Right now rail takes the main column's place`, why || JSON.stringify({ grid, main, rail }));
       }
       if (width === 1280) {
         const { grid, main, rail } = await homeColumns(p, false);
@@ -535,6 +670,18 @@ try {
       await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
       const fits = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: innerWidth }));
       ok(fits.scroll <= fits.inner, `${label}: Home fits the phone's width, with no sideways scroll`, `${fits.scroll}px in ${fits.inner}px`);
+      await p.close();
+    }
+
+    // #64: below 760px Developing is a sideways swipe row that snaps, and only the row scrolls sideways; under reduced motion it doesn't snap
+    if (width === 375) {
+      const p = await open("home");
+      await p.waitForFunction(() => document.querySelectorAll("#pins > .card[data-article]").length === 3, { timeout: 10000 }).catch(() => {});
+      await checkSwipe(p, label);
+      await p.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]).catch(() => {});
+      await p.waitForFunction(() => getComputedStyle(document.getElementById("pins")).scrollSnapType === "none", { timeout: 5000 }).catch(() => {});
+      const calm = await p.evaluate(() => { const s = getComputedStyle(document.getElementById("pins")); return { snap: s.scrollSnapType, behavior: s.scrollBehavior }; });
+      ok(calm.snap === "none" && calm.behavior === "auto", `${label}: under reduced motion the swipe row doesn't snap`, `${calm.snap}, ${calm.behavior}`);
       await p.close();
     }
 
@@ -602,7 +749,7 @@ try {
     }
   }
 
-  // #62 T5 and T6 at the 1024px breakpoint: the "Right now" rail beside the main column at 1024px, below it at 1023px
+  // #62 T5 and T6 at the 1024px breakpoint, and #64: beside the main column at 1024px; at 1023px the Notices tab's panel, in its place
   {
     const openAt = async (width, hash) => {
       const p = await browser.newPage();
@@ -613,12 +760,15 @@ try {
       return p;
     };
 
-    // #62 T5 at 1023: one pixel under the breakpoint the rail drops below the main column
+    // #64 at 1023: one pixel under the breakpoint "Right now" is the Notices tab's panel; chosen, it takes the main column's place
     {
       const p = await openAt(1023, "home");
       await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
-      const { main, rail } = await homeColumns(p, true);
-      ok(rail.width > 0 && rail.top >= main.bottom - 1, "1023: the Right now rail sits below the main column", JSON.stringify({ main, rail }));
+      const why = await chooseTab(p, "notices");
+      const { grid, main, rail } = await homeColumns(p, true);
+      ok(!why && main.width === 0 && rail.width > 0 && Math.abs(rail.top - grid.top) <= 1 && Math.abs(rail.left - grid.left) <= 1 && Math.abs(rail.width - grid.width) <= 1, "1023: under Notices the Right now rail takes the main column's place", why || JSON.stringify({ grid, main, rail }));
+      const panel = await p.evaluate(() => { const r = document.getElementById("homeRail"); return `${r.getAttribute("role")} ${r.getAttribute("aria-labelledby")}`; });
+      ok(panel === "tabpanel homeTab-notices", "1023: the rail is a tab panel labelled by its Notices tab", panel);
       await p.close();
     }
 
@@ -634,6 +784,21 @@ try {
       await p.close();
     }
 
+    // #64 at 1024: the tabs are gone, so whatever #home's data-tab says both columns show, and neither is a tab panel
+    {
+      const p = await openAt(1024, "home");
+      await p.waitForSelector("#home .card[data-article]", { timeout: 5000 }).catch(() => {});
+      const at = await p.evaluate(() => {
+        const home = document.getElementById("home"), m = document.getElementById("homeMain"), r = document.getElementById("homeRail");
+        home.dataset.tab = "notices"; r.hidden = false;
+        const box = el => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, width: b.width }; };
+        return { tab: home.dataset.tab, main: box(m), rail: box(r), mainRole: m.getAttribute("role"), railRole: r.getAttribute("role"), railBy: r.getAttribute("aria-labelledby") };
+      });
+      ok(at.tab === "notices" && at.main.width > 0 && at.rail.width > 0 && at.rail.left >= at.main.right - 1, "1024: with Notices in data-tab, both columns still show side by side", JSON.stringify(at));
+      ok(at.mainRole === null && at.railRole === null && at.railBy === "railH", "1024: neither column is a tab panel, and the rail is labelled by its head", `${at.mainRole} ${at.railRole} ${at.railBy}`);
+      await p.close();
+    }
+
     // At 1024 with the rail really filled (nothing forced), the page doesn't scroll sideways. Read-only.
     {
       const p = await openAt(1024, "home");
@@ -643,6 +808,18 @@ try {
         scroll: document.documentElement.scrollWidth, inner: innerWidth,
       }));
       ok(filled.heads === 3 && filled.scroll <= filled.inner, "1024: Home with its rail filled doesn't scroll sideways", `${filled.heads} heads, ${filled.scroll}px in ${filled.inner}px`);
+      await p.close();
+    }
+
+    // #64: Home's tabs show below 1024px and not from 1024px up; Developing is a swipe row below 760px and a grid from 760px
+    // (tested at 759 and 761, never at exactly 760)
+    for (const w of [759, 761, 1023, 1024]) {
+      const p = await openAt(w, "home");
+      await p.waitForFunction(() => document.getElementById("homeTabs")?.hidden === false && document.querySelectorAll("#pins > .card[data-article]").length === 3, { timeout: 10000 }).catch(() => {});
+      const t = await p.evaluate(() => { const el = document.getElementById("homeTabs"); return { unhidden: el.hidden === false, height: el.getBoundingClientRect().height, display: getComputedStyle(el).display, pins: getComputedStyle(document.getElementById("pins")).display }; });
+      ok(t.unhidden && (w < 1024 ? t.height > 0 : t.height === 0 && t.display === "none"), `${w}: Home's tabs ${w < 1024 ? "show" : "are hidden"}`, `display ${t.display}, ${t.height}px`);
+      if (w === 761) ok(t.pins === "grid", "761: Developing is a grid, not a swipe row", t.pins);
+      if (w === 759) await checkSwipe(p, "759");
       await p.close();
     }
   }

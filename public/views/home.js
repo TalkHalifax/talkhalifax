@@ -7,7 +7,6 @@ const VIEWER_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden=
 const WEEK = 7 * 864e5;
 const FEED_MAX = 24;
 const RAIL_NOTICES = 3;
-const RAIL_REPEATS_BAR = true; // false drops the alert bar's urgent notices from the column
 const WX_MAX_AGE = 3 * 36e5; // matches WX_MAX_AGE in app.js, which doesn't export it: an old reading is worse than none
 
 /** A time that parses and isn't missing (tms gives 0 for none and NaN for nonsense). Intl throws on an invalid date. */
@@ -31,23 +30,30 @@ const urgentNotices = () => (S.stories || [])
 const noticeLabel = n => noticeType(n) + (n.statusLabel ? " · " + n.statusLabel : "");
 const isWeb = u => /^https?:\/\//i.test(String(u || ""));
 
-/** Banners pinned under the header on Home, for urgent things only: weather warnings, then urgent city notices.
- *  Everything else is on the Notices page. */
-function renderBanners() {
-  renderRail(); // loadAlerts and show() call only this, so the column stays current with the bar
-  const el = $("#abars");
+/** The alert bar's items, most urgent first: weather warnings (rank 0), then urgent city notices (rank 1), each newest
+ *  first. The first one is the bar's lead, shown whether or not the rest are folded behind "+N more". */
+function barItems() {
   const items = [];
   for (const a of (S.alerts && S.alerts.items) || []) {
     if (!inBar(a)) continue;
     const until = valid(a.until) ? `Until ${shortDate(a.until)}, ${hm(a.until)}` : "";
-    items.push({ rank: 0, label: "Weather · Warning",
+    items.push({ rank: 0, id: null, label: "Weather · Warning",
       title: a.title, meta: until, at: tms(a.publishedAt), link: `href="${esc(a.url)}" target="_blank" rel="noopener"` });
   }
   for (const n of urgentNotices()) {
-    items.push({ rank: 1, label: noticeLabel(n),
+    items.push({ rank: 1, id: n.id, label: noticeLabel(n),
       title: n.headline, meta: shortDate(n.publishedAt), at: tms(n.publishedAt), link: `href="#article-${esc(n.id)}" data-article="${esc(n.id)}"` });
   }
   items.sort((a, b) => a.rank - b.rank || b.at - a.at);
+  return items;
+}
+
+/** Banners pinned under the header on Home, for urgent things only: weather warnings, then urgent city notices.
+ *  Everything else is on the Notices page. */
+function renderBanners() {
+  const items = barItems();
+  renderRail(items); // loadAlerts and show() call only this, so the column stays current with the bar
+  const el = $("#abars");
   el.hidden = S.current !== "home" || !items.length;
   if (el.hidden) { el.innerHTML = ""; return; }
   const shown = S.allBanners ? items : items.slice(0, 1);
@@ -93,25 +99,32 @@ function railWatches() {
   return `<h3>Weather watches and statements</h3><div class="feed">${rows}</div>`;
 }
 
-/** City notices, newest first (Home rule 1): when any is urgent, only the urgent ones, replacing the latest; when none is,
- *  the latest. With RAIL_REPEATS_BAR off, the bar's urgent ones are left out and the latest of the rest are shown. */
-function railNotices() {
+/** City notices without repeating the alert bar (the editor's decision): every notice on the bar, folded behind
+ *  "+N more" or not, is left out; then the remaining urgent notices come first, newest first, filled with the latest
+ *  of the rest, up to RAIL_NOTICES (3). Weather warnings on the bar leave no notice out. */
+function railNotices(barList) {
   if (!S.stories) return "";
-  const urgent = urgentNotices();
+  const skip = new Set((barList || []).filter(b => b.rank === 1).map(b => b.id));
+  const urgent = urgentNotices().filter(n => !skip.has(n.id));
   const ids = new Set(urgent.map(n => n.id));
-  const rest = S.stories.filter(n => n.kind === "notice" && !ids.has(n.id)).sort(byPublished);
-  const picked = (RAIL_REPEATS_BAR && urgent.length ? urgent : rest).slice(0, RAIL_NOTICES);
+  const rest = S.stories.filter(n => n.kind === "notice" && !skip.has(n.id) && !ids.has(n.id)).sort(byPublished);
+  const picked = urgent.concat(rest).slice(0, RAIL_NOTICES);
   if (!picked.length) return "";
   const rows = picked.map(n => `<a class="feed-row" href="#article-${esc(n.id)}" data-article="${esc(n.id)}"><span class="pill">${esc(noticeLabel(n))}</span><span class="tt">${esc(n.headline)}</span><time class="stamp"${dt(n.publishedAt)}>${esc(when(n.publishedAt))}</time></a>`).join("");
   return `<h3>Notices</h3><div class="feed">${rows}</div><a class="more" href="#notices" data-go="notices">All notices</a>`;
 }
 
-/** The "Right now" column: weather, then watches and statements, then notices, leaving out any that are empty. */
-function renderRail() {
+const RAIL_EMPTY = '<div class="msg">Nothing right now.</div><a class="more" href="#notices" data-go="notices">All notices</a>';
+
+/** The "Right now" column: weather, then watches and statements, then notices, leaving out any that are empty.
+ *  `barList` is the alert bar's whole list, folded or not; the notices leave out every notice in it. */
+function renderRail(barList) {
   const rail = $("#homeRail"), body = $("#railBody");
   if (!rail || !body) return;
-  const html = railWeather() + railWatches() + railNotices();
+  const html = railWeather() + railWatches() + railNotices(barList);
   if (html) { rail.hidden = false; setCards(body, html); }
+  // Once stories have loaded, the column (the phone's Notices tab) is never blank
+  else if (S.stories) { rail.hidden = false; setCards(body, RAIL_EMPTY); }
   else { rail.hidden = true; setCards(body, ""); }
 }
 
@@ -135,16 +148,94 @@ function setCards(box, html) {
   for (const [id, { el, r }] of old) {
     if (seen.has(id)) continue;
     el.classList.add("ghost"); el.removeAttribute("data-article"); el.setAttribute("aria-hidden", "true"); el.tabIndex = -1;
-    Object.assign(el.style, { left: r.left - boxR.left + "px", top: r.top - boxR.top + "px", width: r.width + "px", height: r.height + "px" });
+    Object.assign(el.style, { left: r.left - boxR.left + box.scrollLeft + "px", top: r.top - boxR.top + box.scrollTop + "px", width: r.width + "px", height: r.height + "px" });
     box.appendChild(el);
     el.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.96)" }], { duration: 360, easing: "ease-in", fill: "forwards" }).onfinish = () => el.remove();
   }
+}
+
+// The phone tabs (Site's #homeTabs): the choice lasts for the visit, with nothing written to the address or storage
+const TABS = ["all", "news", "notices"];
+let homeTab = "all";
+
+/** Mark the chosen tab on #home (CSS shows its column below 1024px) and on the tab buttons; focus moves only on keys. */
+function applyTab(focus) {
+  const home = $("#home");
+  if (home) home.dataset.tab = homeTab;
+  applyPanels();
+  const box = $("#homeTabs");
+  if (!box) return;
+  for (const btn of box.querySelectorAll('[role="tab"]')) {
+    const on = btn.dataset.tab === homeTab;
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+    btn.tabIndex = on ? 0 : -1;
+    if (on && focus) btn.focus();
+  }
+}
+
+// The tab panel roles apply only where the tabs show (below 1024px); on desktop the aside stays a plain landmark
+const PHONE = typeof matchMedia === "function" ? matchMedia("(max-width: 1023.98px)") : null;
+/** Each panel's own aria-labelledby from the markup (the aside's is its "Right now" head), put back off phone widths. */
+const ownLabel = new WeakMap();
+
+/** On phone widths, #homeMain and #homeRail are tab panels labelled by their tabs; otherwise neither has the role. */
+function applyPanels() {
+  const box = $("#homeTabs");
+  const tabs = box ? [...box.querySelectorAll('[role="tab"]')] : [];
+  for (const btn of tabs) if (!btn.id && btn.dataset.tab) btn.id = "homeTab-" + btn.dataset.tab;
+  const tabId = name => { const b = tabs.find(x => x.dataset.tab === name); return b && b.id ? b.id : ""; };
+  const main = $("#homeMain") || $("#home .home-main"), rail = $("#homeRail");
+  const phone = !!(PHONE && PHONE.matches);
+  const set = (el, tabLabel) => {
+    if (!el) return;
+    if (!ownLabel.has(el)) ownLabel.set(el, el.getAttribute("aria-labelledby") || "");
+    const label = (phone && tabLabel) || ownLabel.get(el);
+    if (phone) el.setAttribute("role", "tabpanel");
+    else el.removeAttribute("role");
+    if (label) el.setAttribute("aria-labelledby", label);
+    else el.removeAttribute("aria-labelledby"); // a label pointing at nothing is worse than none
+  };
+  set(main, tabId(homeTab === "all" || homeTab === "news" ? homeTab : "all"));
+  set(rail, tabId("notices"));
+}
+
+if (PHONE) {
+  if (typeof PHONE.addEventListener === "function") PHONE.addEventListener("change", applyPanels);
+  else if (typeof PHONE.addListener === "function") PHONE.addListener(applyPanels);
+}
+
+function selectTab(tab, focus) {
+  if (!TABS.includes(tab)) return;
+  homeTab = tab;
+  applyTab(focus);
+}
+
+/** One click and one key listener on the tab list, once: arrows move between tabs (wrapping), Home and End to the ends. */
+function wireTabs() {
+  const box = $("#homeTabs");
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = "1";
+  box.addEventListener("click", e => {
+    const btn = e.target.closest('[role="tab"]');
+    if (btn && box.contains(btn)) selectTab(btn.dataset.tab, false);
+  });
+  box.addEventListener("keydown", e => {
+    const i = TABS.indexOf(homeTab), n = TABS.length;
+    const t = e.key === "ArrowRight" ? TABS[(i + 1) % n]
+      : e.key === "ArrowLeft" ? TABS[(i - 1 + n) % n]
+      : e.key === "Home" ? TABS[0]
+      : e.key === "End" ? TABS[n - 1] : null;
+    if (!t) return;
+    e.preventDefault();
+    selectTab(t, true);
+  });
 }
 
 const EMPTY_ALL = '<div class="msg">Nothing developing right now. New stories appear here as the newsroom publishes them, and settled ones are in <a href="#articles" data-go="articles">Articles</a>.</div>';
 
 /** Home is the developing stories pinned first, then the settled articles as a feed, each the most recently updated first. */
 function renderHome() {
+  wireTabs(); applyTab(false);
   renderBanners(); // the alert bar, and the "Right now" column with it
   // Build 1 drew everything in #devCards; the sections below replace it
   const dev = $("#devCards");
@@ -156,6 +247,8 @@ function renderHome() {
     feedSec.hidden = true; setCards(feedBox, "");
     return;
   }
+  const tabs = $("#homeTabs");
+  if (tabs) tabs.hidden = false;
   const t = tms;
   const offline = !navigator.onLine;
   const updated = x => Math.max(t(x.lastUpdate), t(x.developingSince), t(x.publishedAt));

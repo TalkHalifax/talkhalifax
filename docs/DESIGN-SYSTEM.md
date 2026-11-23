@@ -69,13 +69,13 @@ uppercase, `.1em` tracking. Reading width stays under about 68ch.
 | Width | Layout |
 |---|---|
 | ≥ 1024px | Home is two columns, the main column plus the 320px "Right now" column on the right (32px gap, top-aligned), when the side column has content; otherwise the main column fills the width |
-| < 1024px | Home is one column; "Right now" stacks below the main column (36px above it) |
+| < 1024px | Home is one column with the tabs (All, News, Notices) at the top. All and News show the main column; Notices shows "Right now" in its place. At 1024px and up there are no tabs and both columns show |
 | ≥ 960px | Story with the chat docked on the right (`--chatw` 400px), full header nav |
 | < 960px | The chat becomes a bottom sheet; its header bar toggles it |
-| < 760px | Header sections move into the drawer behind the profile button |
+| < 760px | Header sections move into the drawer behind the profile button. On Home, Developing becomes a sideways swipe row |
 | < 560px | Phone spacing: tighter gutters, smaller section titles, shallower reply indents |
 
-Home content is at most `--page-max` (1200px) wide, centred. The lead story card spans the full row at every width.
+Home content is at most `--page-max` (1200px) wide, centred. The lead story card spans the full row from 760px up; below 760px it is the first card in the swipe row.
 
 Page gutters are `max(28px, safe-area inset)`. The viewport disables pinch zoom (it's an app-like surface), so
 text sizes must already be readable: 16px body minimum on inputs to stop iOS zooming.
@@ -95,11 +95,13 @@ text sizes must already be readable: 16px body minimum on inputs to stop iOS zoo
 | App icon | `public/icons/` | A Halifax skyline (lighthouse, the Macdonald Bridge, City Hall's clock tower, the Dominion Building, a church spire, towers behind) over the harbour, navy on pale blue, no words. Rounded for `any`; full-bleed with the skyline inside the 80% safe zone for `maskable`; square for Apple's touch icon; the 32 px favicon is cropped to the bridge and clock tower |
 | Drawer | `.drawer`, `.dr-*` | Phone navigation and account, a native `<dialog>` |
 | Home layout | `.home-grid`, `.home-main`, `.home-sec`, `.home-rail`, `.rail-body` | `.home-grid` (max `--page-max`, centred) holds `.home-main` and the `.home-rail` aside ("Right now", `#homeRail`, labelled by `#railH`, body `#railBody`). In `.home-main`, sections `#pinsSec` ("Developing", cards in `#pins`, count in `#pinsCount`) and `#feedSec` ("Latest", rows in `#feed`) sit 36px apart; the spacing counts only the regions showing, so a hidden region takes no space and never pushes the next one down (at 1024px and up the "Right now" head lines up with the first head showing in `.home-main`). Every region carries `hidden` until Home fills it. The page's only heading until then is a visually hidden h1 (`.sr`) |
+| Home tabs | `.home-tabs`, `#homeTabs` | Phone and mid widths only (hidden at 1024px and up). A `role="tablist"` of three `.nfilters` chips, All, News and Notices, at 44px; the selected tab is `aria-selected="true"` with an `--ink` fill that hover doesn't change, and every tab keeps the chips' 2px `--focus` ring. All and News control `#homeMain` (`.home-main`) and Notices controls `#homeRail`, both `role="tabpanel"`. Starts `hidden`; Home's JS shows it and sets `#home[data-tab]`. Notices hides `.home-main` and shows `#homeRail` in its place; with All, News or no `data-tab` the rail is not shown |
+| Developing swipe row | `#pins` under 760px | `#pins` becomes a sideways row with scroll-snap (`x mandatory`, cards snap to their start), each card about 85% wide so the next one peeks in; the lead is the first card. Under `prefers-reduced-motion: reduce` there is no snapping, and smooth scrolling is never set. Only `#pins` scrolls sideways, never the page |
 | Right now rail | `.home-rail`, `.rail-body` | Up to three blocks, in order: Weather (current conditions, linking to Environment Canada; left out when the reading is over 3 hours old), Weather watches and statements (warnings stay in the alert bar), and Notices (up to 3, then "All notices"). Each block is a 13px Inter 600 `--ink` h3 sub-head over a `.feed`, 24px between blocks; an empty block is left out. Rows always use the two-line feed layout (type and stamp, headline below). "All notices" is a 44px target with its own 2px `--focus` ring |
 | Section head | `.sec-head`, `.sec-count` | The label style: 12px Inter 600, uppercase, `.1em` tracking, `--ink-muted`. `.sec-count` beside it in 12px mono, tabular, hidden while empty. A head with `.live-h` shows LIVE (12px, 700, `--signal-warn`) only when its `.home-sec` holds a developing (non-archived) card |
 | Feed row | `.feed`, `.feed-row` | A list under a hairline, one row per story: `.pill` as the type label, headline (`.tt`, display 600 16px, balanced) and `.stamp`. At least 44px tall, underline on hover, its own 2px `--focus` outline. Under 560px the type and stamp share the first line with the headline below; inside the rail (`.rail-body`) that two-line layout applies at every width. An empty `.feed` takes no space |
 | Timestamp | `.stamp` | 12.5px mono, tabular, `--ink-muted`, never wraps |
-| Story card | `.card` (`.lead` spans the full row) | Glass; kicker, headline, dek, pills, live viewer count. On Home the headline is the display face with `text-wrap: balance` (lead 700/28px, others 600/17px). `.upd` (a recent update) is `--ink` at 600, not red. The live viewer icon is `--signal-warn` |
+| Story card | `.card` (`.lead` spans the full row from 760px up) | Glass; kicker, headline, dek, pills, live viewer count. On Home the headline is the display face with `text-wrap: balance` (lead 700/28px, others 600/17px). `.upd` (a recent update) is `--ink` at 600, not red. The live viewer icon is `--signal-warn` |
 | Card footer group | `.ft-start` | Inside `.ft`, groups the stamp and pill on the left; the viewer count after it is pushed right |
 | Pill | `.pill` | Status labels (LIVE, Update, area) |
 | Alert banner | `.abar` | Solid band on Home for city notices and weather warnings |
