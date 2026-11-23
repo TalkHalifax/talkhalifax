@@ -99,8 +99,19 @@ From a terminal or a cloud routine: `node scripts/newsroom.mjs tool <name> [json
 ## Site features
 
 - **Weather**: icon and "Feels like" in the header on desktop (the temperature alone on narrow screens) and at the bottom of the phone menu, linking to Environment Canada. Hidden if the reading is over 3 hours old.
-- **Home**: developing stories as cards, latest first, with live people counts; urgent notices and weather warnings
-  in banners under the header.
+- **Home**: a front page plus a feed.
+  - **Developing:** every developing story as a pinned card with its live people count, the most recently updated first.
+  - **Latest:** up to 24 settled articles as a list, the most recently updated first.
+  - **Right now**, a side column at 1024px and up:
+    - the weather, left out when the reading is over 3 hours old;
+    - weather watches and statements;
+    - up to 3 notices, then All notices. The remaining urgent ones come first, then the most recent.
+    - With nothing to show, it says "Nothing right now."
+  - **The alert bar** under the header holds weather warnings, then urgent notices from the last week, the most urgent
+    first. Any beyond the first fold behind "+N more". Right now never repeats a notice the bar holds, folded or not.
+  - **Below 1024px:** tabs at the top, All, News and Notices. All and News show Developing and Latest (News is the
+    same as All for now). Notices shows Right now in their place. The choice lasts for the visit.
+  - **Below 760px:** Developing becomes a sideways swipe row, and the next card peeks in.
 - **Transit** (`#transit`, or `#transit-<route>`): a live map of every bus and ferry (MapLibre, OpenFreeMap tiles),
   updated every 15 seconds. Pick a route to see only it and its line; tap a vehicle for its headsign, next stop, speed,
   seats and the route's service alerts.
