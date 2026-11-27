@@ -60,8 +60,15 @@ const freePort = async (avoid = 0) => {
   }
   throw new Error("couldn't find a free port");
 };
-// This run's data folder goes when the run ends; a folder that won't go never fails the run
-const removeData = () => { try { rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* left behind */ } };
+// This run's data folder goes when the run ends. Node's retry delay grows linearly, so a locked file is retried for about
+// 16.5 s at most; a folder left behind is named but never fails the run.
+let dataDone = false;
+const removeData = () => {
+  if (dataDone) return;
+  dataDone = true;
+  try { rmSync(DATA, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* reported below */ }
+  if (existsSync(DATA)) console.error(`data folder left behind: ${DATA}`);
+};
 
 // The port: E2E_PORT if set (in use means stop, never another port), otherwise one from the OS. Another run (or anything
 // else) can't be on it, so this run never touches another's data or Worker.
@@ -203,6 +210,9 @@ const stopServer = (s = server) => {
   if (!s) return;
   try { if (win) execSync(`taskkill /pid ${s.pid} /T /F`, { stdio: "ignore" }); else process.kill(-s.pid); } catch { /* already gone */ }
 };
+// Resolves once the Worker process has exited, or after ms; at once if it already has
+const waitExit = (s = server, ms = 10000) => !s || s.exitCode !== null || s.signalCode !== null ? Promise.resolve()
+  : new Promise(r => { const t = setTimeout(r, ms); s.once("exit", () => { clearTimeout(t); r(); }); });
 
 let browser, profile, bad = false, stopping = false, quitCode = null, ready = false;
 const dropProfile = () => { if (profile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ } };
@@ -212,8 +222,7 @@ const quit = code => {
   stopping = true;
   quitCode = code;
   stopServer();
-  removeData();
-  Promise.race([browser?.close(), wait(5000)]).catch(() => {}).finally(() => { dropProfile(); process.exit(code); });
+  waitExit().then(() => { removeData(); return Promise.race([browser?.close(), wait(5000)]); }).catch(() => {}).finally(() => { dropProfile(); process.exit(code); });
 };
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(signal, () => quit(code));
 server.on("exit", (code, signal) => {
@@ -307,6 +316,7 @@ try {
   stopping = true; // our own stop, not a crash
   await browser?.close().catch(() => {});
   stopServer();
+  await waitExit();
   removeData();
   dropProfile();
 }
