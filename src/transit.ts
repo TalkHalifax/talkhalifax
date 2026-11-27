@@ -114,17 +114,21 @@ function cached(name: keyof typeof FEEDS, build: () => Promise<unknown>) {
   return body;
 }
 
-/** Why the map's fixed data needs attention soon, or null. The schedule's end date is YYYYMMDD. */
+/** Why the map's fixed data needs attention, or null. The schedule's end date is YYYYMMDD. The daily Transit job builds
+ *  the new schedule as soon as Halifax Transit publishes it and opens an issue, so the check stays quiet until the
+ *  schedule's last day. It fails on that day, a backstop in case the job failed quietly, and every day after. */
 export function scheduleProblem(feedEnd: string, now = new Date()) {
   const m = feedEnd.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (!m) return "The Transit schedule has no end date. Check the Transit schedule workflow on GitHub (Actions tab).";
   const end = `${m[1]}-${m[2]}-${m[3]}`, today = now.toLocaleDateString("en-CA", { timeZone: "America/Halifax" });
   const days = Math.round((Date.parse(end) - Date.parse(today)) / 864e5);
-  if (days > 7) return null;
-  return `The Transit schedule ${days < 0 ? "ended" : "ends"} ${end}. After that, buses show without names or lines. If Halifax Transit has published a new one, run the Transit schedule workflow on GitHub (Actions tab).`;
+  if (days > 0) return null;
+  // On the last day the new schedule usually starts tomorrow, and merging before its start date would break the map early
+  if (days === 0) return `The Transit schedule ends today, ${end}. After that, buses show without names or lines. Merge the pull request from the open "New Transit schedule" issue on its start date. If there's none, run the Transit schedule workflow once Halifax Transit publishes.`;
+  return `The Transit schedule ended ${end}, so buses show without names or lines. Merge the pull request from the open "New Transit schedule" issue now. If there's none, run the Transit schedule workflow on GitHub once Halifax Transit has published.`;
 }
 
-/** The cron's job: fail, so the editor hears once, in the last week of the map's schedule. */
+/** The cron's job: fail from the map's schedule's last day, so the editor hears. */
 export function checkTransitSchedule(now = new Date()) {
   const problem = scheduleProblem(DATA.feedEnd, now);
   if (problem) throw new Error(problem);

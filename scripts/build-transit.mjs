@@ -1,7 +1,7 @@
 // Builds the Transit map's fixed data from Halifax Transit's GTFS schedule (https://gtfs.halifax.ca/static/google_transit.zip).
-// A GitHub Action runs it each week (.github/workflows/transit.yml). By hand:
+// A GitHub Action runs it each day (.github/workflows/transit.yml). By hand:
 //   node scripts/build-transit.mjs            always rebuild
-//   node scripts/build-transit.mjs --if-new   rebuild only if a newer schedule has started
+//   node scripts/build-transit.mjs --if-new   rebuild only if a newer schedule starts within LEAD_DAYS
 // Writes:
 //   src/transit-data.json     for the Worker: routes, each trip's headsign and shape, stop names
 //   public/transit/shapes.json for the page: each route's lines, simplified and polyline-encoded
@@ -9,6 +9,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 
 const URL_ = "https://gtfs.halifax.ca/static/google_transit.zip";
+// How early a new schedule is built, so its pull request can be merged on the day it starts, not after
+const LEAD_DAYS = 3;
 const TOLERANCE = 0.00008; // about 8 m: keeps the lines on the streets at city zoom, drops 90%+ of the points
 
 // ---------- zip and csv, just enough for a GTFS file ----------
@@ -82,12 +84,15 @@ const info = csv(f["feed_info.txt"] || "")[0] || {};
 const routes = csv(f["routes.txt"]), trips = csv(f["trips.txt"]), stops = csv(f["stops.txt"]);
 
 // Dates as Halifax sees them, YYYYMMDD like the feed's
-const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Halifax" }).replace(/-/g, "");
+const ymd = d => d.toLocaleDateString("en-CA", { timeZone: "America/Halifax" }).replace(/-/g, "");
+const today = ymd(new Date());
 if (process.argv.includes("--if-new")) {
   const current = existsSync("src/transit-data.json") ? JSON.parse(readFileSync("src/transit-data.json", "utf8")).feedVersion : "";
   if (info.feed_version === current) { console.log(`Halifax Transit ${current} is already in use. Nothing to do.`); process.exit(0); }
-  // Vehicles run the old schedule until the new one starts, so switching early would cost them their names and lines
-  if (info.feed_start_date > today) { console.log(`Halifax Transit ${info.feed_version} starts ${info.feed_start_date}. Waiting until then.`); process.exit(0); }
+  // Vehicles run the old schedule until the new one starts, so merging early would cost them their names and lines.
+  // Building a few days ahead gives the pull request time; it says not to merge before the start date.
+  const lead = ymd(new Date(Date.now() + LEAD_DAYS * 864e5));
+  if (info.feed_start_date > lead) { console.log(`Halifax Transit ${info.feed_version} starts ${info.feed_start_date}. Waiting until ${LEAD_DAYS} days before.`); process.exit(0); }
 }
 // A damaged download shouldn't replace good data
 if (routes.length < 20 || trips.length < 1000 || stops.length < 500) throw new Error(`The feed looks wrong: ${routes.length} routes, ${trips.length} trips, ${stops.length} stops.`);
@@ -106,7 +111,7 @@ for (const t of trips) {
 }
 
 const worker = {
-  source: URL_, feedVersion: info.feed_version || "", feedEnd: info.feed_end_date || "", built: new Date().toISOString().slice(0, 10),
+  source: URL_, feedVersion: info.feed_version || "", feedStart: info.feed_start_date || "", feedEnd: info.feed_end_date || "", built: new Date().toISOString().slice(0, 10),
   // route id -> [short name, long name, GTFS route_type (3 bus, 4 ferry)]
   routes: Object.fromEntries(routes.map(r => [r.route_id, [r.route_short_name, r.route_long_name, +r.route_type]])),
   headsigns, shapeIds,

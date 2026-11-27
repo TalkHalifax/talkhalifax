@@ -239,7 +239,7 @@ async function jobList(env: Env, now: number): Promise<Job[]> {
     return { name, does, every, lastAt: at, state: at === null || now - at > limitMs ? "late" : "ok", failures: 0 };
   };
   list.push(dispatched("events.yml", "Library events", "Fetches events and posts them to the site", "6 hours", 7 * HOUR_MS));
-  list.push(dispatched("transit.yml", "Transit schedule", "Rebuilds the map's data for a new schedule", "7 days", 8 * DAY_MS));
+  list.push(dispatched("transit.yml", "Transit schedule", "Builds a new schedule for the map on a branch and opens an issue", "Daily", 2 * DAY_MS));
   return list;
 }
 

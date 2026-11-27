@@ -22,12 +22,12 @@ const JOBS = [
   { name: "Weather warnings", does: "Environment Canada banners and notices", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Events check", does: "Warns when library events stop arriving", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Stages", does: "Moves Developing stories to Articles", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
-  { name: "Transit schedule check", does: "Warns before the map's schedule data runs out", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
+  { name: "Transit schedule check", does: "Warns from the last day of the map's schedule data", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "GitHub jobs", does: "Starts the library events and Transit jobs", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Clean-up", does: "Expired sessions, links, rate limits and old counts", every: "30 minutes", lastAt: 1794054000000, state: "failing", failures: 1 },
   { name: "Alert address clean-up", does: "Deletes alert addresses with no alert reaching them or change in 180 days, or after five failed alerts", every: "Daily (checked every 30 minutes)", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Library events", does: "Fetches events and posts them to the site", every: "6 hours", lastAt: 1794051000000, state: "ok", failures: 0 },
-  { name: "Transit schedule", does: "Rebuilds the map's data for a new schedule", every: "7 days", lastAt: 1793277000000, state: "late", failures: 0 },
+  { name: "Transit schedule", does: "Builds a new schedule for the map on a branch and opens an issue", every: "Daily", lastAt: 1793277000000, state: "late", failures: 0 },
 ];
 
 const SUMMARY = {

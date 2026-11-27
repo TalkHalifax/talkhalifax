@@ -35,7 +35,7 @@ export const CRON_JOBS: readonly CronJob[] = [
   { key: "alerts", run: refreshAlerts, name: "Weather warnings", does: "Environment Canada banners and notices", every: "30 minutes" },
   { key: "events", run: checkEvents, name: "Events check", does: "Warns when library events stop arriving", every: "30 minutes" },
   { key: "stages", run: evaluateStages, name: "Stages", does: "Moves Developing stories to Articles", every: "30 minutes" },
-  { key: "transit schedule", run: async () => checkTransitSchedule(), name: "Transit schedule check", does: "Warns before the map's schedule data runs out", every: "30 minutes" },
+  { key: "transit schedule", run: async () => checkTransitSchedule(), name: "Transit schedule check", does: "Warns from the last day of the map's schedule data", every: "30 minutes" },
   { key: "GitHub jobs", run: startGithubJobs, name: "GitHub jobs", does: "Starts the library events and Transit jobs", every: "30 minutes" },
   { key: "clean-up", run: tidyUp, name: "Clean-up", does: "Expired sessions, links, rate limits and old counts", every: "30 minutes" },
   { key: "push sweep", run: sweepSubscriptions, name: "Alert address clean-up", does: `Deletes alert addresses with no alert reaching them or change in ${SWEEP_AFTER_DAYS} days, or after five failed alerts`, every: "Daily (checked every 30 minutes)" },
