@@ -123,8 +123,9 @@ export function scheduleProblem(feedEnd: string, now = new Date()) {
   const end = `${m[1]}-${m[2]}-${m[3]}`, today = now.toLocaleDateString("en-CA", { timeZone: "America/Halifax" });
   const days = Math.round((Date.parse(end) - Date.parse(today)) / 864e5);
   if (days > 0) return null;
-  const when = days < 0 ? `ended ${end}, so buses show` : `ends today, ${end}. After that, buses show`;
-  return `The Transit schedule ${when} without names or lines. Merge the pull request from the open "New Transit schedule" issue. If there's none, run the Transit schedule workflow on GitHub once Halifax Transit has published.`;
+  // On the last day the new schedule usually starts tomorrow, and merging before its start date would break the map early
+  if (days === 0) return `The Transit schedule ends today, ${end}. After that, buses show without names or lines. Merge the pull request from the open "New Transit schedule" issue on its start date. If there's none, run the Transit schedule workflow once Halifax Transit publishes.`;
+  return `The Transit schedule ended ${end}, so buses show without names or lines. Merge the pull request from the open "New Transit schedule" issue now. If there's none, run the Transit schedule workflow on GitHub once Halifax Transit has published.`;
 }
 
 /** The cron's job: fail from the map's schedule's last day, so the editor hears. */

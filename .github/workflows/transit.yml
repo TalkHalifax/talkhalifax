@@ -91,7 +91,9 @@ jobs:
           START: ${{ steps.changed.outputs.start }}
           END: ${{ steps.changed.outputs.end }}
         run: |
-          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"New Transit schedule $VERSION\" in:title" --json number --jq length)
+          # GitHub's search splits words on . _ and -, so check the exact title start: an older version's open issue
+          # mustn't count as this one's
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --search 'in:title "New Transit schedule"' --json title --jq '[.[] | select(.title | startswith("New Transit schedule " + env.VERSION + ":"))] | length')
           if [ "$open" != "0" ]; then
             echo "Its issue is already open."
             exit 0

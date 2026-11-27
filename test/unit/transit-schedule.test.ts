@@ -27,6 +27,12 @@ describe("the Transit schedule check", () => {
     expect(msg).toMatch(/New Transit schedule" issue/);
     expect(msg).toMatch(/Transit schedule workflow/);
   });
+  it("on the last day says to merge on the issue's start date, not now; once ended, to merge now", () => {
+    const last = scheduleProblem("20261129", on("2026-11-29"))!, after = scheduleProblem("20261129", on("2026-12-01"))!;
+    expect(last).toMatch(/on its start date/);
+    expect(last).not.toMatch(/ now\./);
+    expect(after).toMatch(/issue now\./);
+  });
   it("stays well under the 300 characters the cron's alert keeps", () => {
     expect(scheduleProblem("20261129", on("2026-11-29"))!.length).toBeLessThan(270);
     expect(scheduleProblem("20261129", on("2026-12-01"))!.length).toBeLessThan(270);
