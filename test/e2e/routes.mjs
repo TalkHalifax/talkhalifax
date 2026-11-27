@@ -2,18 +2,73 @@
 // and every kind of story by clicking its card, at phone and desktop widths. Run before every deploy.
 //   npm run test:e2e
 // Uses Chrome or Edge from the system, or the one at CHROME_PATH.
+// Each run has its own id, data folder (.wrangler/e2e-<run id>, removed at the end) and port: one the OS hands out, or
+// E2E_PORT if set (never another). Before any check it makes sure the Worker answering is this run's own.
+import { randomBytes } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 import { checkSwPush } from "./sw-push.mjs";
 
-const PORT = 8791, B = `http://localhost:${PORT}`;
-const DATA = ".wrangler/e2e";
+// This run's id (8 hex characters, short for Windows path length), its data folder and its own marker user
+const RUN = randomBytes(4).toString("hex");
+const DATA = `.wrangler/e2e-${RUN}`;
+const RUN_USER = `u_e2e_run_${RUN}`;
+let PORT, B, INSPECTOR; // chosen below, before any wrangler call; B always follows PORT
+const usePort = p => { PORT = p; B = `http://localhost:${PORT}`; };
 const WRANGLER = ["wrangler", "--config", "test/wrangler.test.jsonc"];
 const win = process.platform === "win32";
 const wait = ms => new Promise(r => setTimeout(r, ms));
+
+// A connection means something is listening on that port and host; an error (refused, or no ::1 at all) means free
+const inUse = (port, host) => new Promise(r => { const s = connect(port, host); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
+const busyOn = async port => (await inUse(port, "127.0.0.1")) ? "127.0.0.1" : (await inUse(port, "::1")) ? "::1" : "";
+// A port the OS hands out on 127.0.0.1 that is also free on ::1 and isn't `avoid`: up to 5 tries
+const freePort = async (avoid = 0) => {
+  for (let i = 0; i < 5; i++) {
+    const srv = createServer();
+    await new Promise((resolve, reject) => { srv.once("error", reject); srv.listen(0, "127.0.0.1", resolve); });
+    const port = srv.address().port;
+    await new Promise(resolve => srv.close(resolve));
+    if (port !== avoid && !await inUse(port, "::1")) return port;
+  }
+  throw new Error("couldn't find a free port");
+};
+// This run's data folder goes when the run ends. Node's retry delay grows linearly, so a locked file is retried for about
+// 16.5 s at most; a folder left behind is named but never fails the run.
+let dataDone = false;
+const removeData = () => {
+  if (dataDone) return;
+  dataDone = true;
+  try { rmSync(DATA, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* reported below */ }
+  if (existsSync(DATA)) console.error(`data folder left behind: ${DATA}`);
+};
+class StartupError extends Error {}
+
+// The port: E2E_PORT if set (in use means stop, never another port), otherwise one from the OS
+const FORCED = process.env.E2E_PORT;
+const PORT_FROM = FORCED === undefined ? "port from the OS" : "E2E_PORT";
+if (FORCED !== undefined) {
+  if (!/^\d+$/.test(FORCED) || Number(FORCED) < 1024 || Number(FORCED) > 65535) {
+    console.error(`E2E_PORT must be a whole number from 1024 to 65535, not "${FORCED}"`);
+    process.exit(1);
+  }
+  usePort(Number(FORCED));
+  const host = await busyOn(PORT);
+  if (host) {
+    console.error(`port ${PORT} (E2E_PORT) is in use on ${host}; not starting`);
+    process.exit(1);
+  }
+} else {
+  try { usePort(await freePort()); } catch (e) { console.error(e.message); process.exit(1); }
+}
+// The inspector port, always from the OS. Left to itself wrangler 4.158.0 starts at 9229 and takes the first free port
+// (node_modules/wrangler/wrangler-dist/cli.js:214156, DEFAULT_INSPECTOR_PORT = 9229; :214913, getInspectorPort =
+// memoizeGetPort(DEFAULT_INSPECTOR_PORT, "127.0.0.1")), so two runs started together can race for the same port.
+try { INSPECTOR = await freePort(PORT); } catch (e) { console.error(e.message); process.exit(1); }
 
 const STORIES = [
   { id: "e2e-developing", kind: "article", stage: "developing", headline: "A story still developing", list: "home", cards: "#pins", chat: true },
@@ -71,6 +126,9 @@ const SEED_API = [
   apiComment("c_e2e_seeded", "u_e2e_other", "A seeded comment"),
   `INSERT INTO reports (id, kind, target_id, story_id, author_id, text, reporter_id, created_at, resolved) VALUES ('r_e2e_1', 'comment', 'c_e2e_seeded', 'e2e-api-archived', 'u_e2e_other', 'A seeded comment', 'u_e2e_member', ${T}, NULL);`,
 ].join(" ");
+// This run's marker: a user only this run's data has, so the Worker on the port can be checked as ours. A user, not a
+// story, since some checks count stories exactly.
+const SEED_RUN = apiUser(RUN_USER, "password", `e2e_run_${RUN}`, "E2E Run", "member");
 
 function browserPath() {
   const found = [process.env.CHROME_PATH, "/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium",
@@ -97,22 +155,45 @@ await checkSwPush(ok);
 
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
-writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_ALERTS} ${SEED_API}`);
+writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_ALERTS} ${SEED_API} ${SEED_RUN}`);
 npx([...WRANGLER, "d1", "execute", "talkhalifax-test", "--local", "--persist-to", DATA, "--file", `${DATA}/seed.sql`]);
 
-const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
+// Both ports again, just before the Worker starts, since something may have taken them meanwhile. E2E_PORT taken: stop.
+{
+  const host = await busyOn(PORT);
+  if (host && FORCED !== undefined) {
+    console.error(`port ${PORT} (E2E_PORT) is in use on ${host}; not starting`);
+    removeData();
+    process.exit(1);
+  }
+  try {
+    if (host) usePort(await freePort(INSPECTOR));
+    if (await busyOn(INSPECTOR)) INSPECTOR = await freePort(PORT);
+  } catch (e) { console.error(e.message); removeData(); process.exit(1); }
+}
+const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--inspector-port", String(INSPECTOR), "--inspector-ip", "127.0.0.1", "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
+console.log(`Local Worker: ${B} (${PORT_FROM}), inspector ${INSPECTOR}, data ${DATA}, run ${RUN}, pid ${server.pid}`);
+let exited = null;
+server.once("exit", (code, signal) => { exited = { code, signal }; });
 const stopServer = (s = server) => {
   if (!s) return;
   try { if (win) execSync(`taskkill /pid ${s.pid} /T /F`, { stdio: "ignore" }); else process.kill(-s.pid); } catch { /* already gone */ }
 };
+// Resolves once the Worker process has exited, or after ms; at once if it already has
+const waitExit = (s = server, ms = 10000) => !s || s.exitCode !== null || s.signalCode !== null ? Promise.resolve()
+  : new Promise(r => { const t = setTimeout(r, ms); s.once("exit", () => { clearTimeout(t); r(); }); });
 
-let browser;
+let browser, startFailed = false;
 try {
   for (let i = 0; ; i++) {
+    if (exited) throw new StartupError(`The local Worker exited before it was ready (code ${exited.code}, signal ${exited.signal}), port ${PORT}`);
     if (await fetch(B + "/api/stories").then(r => r.ok, () => false)) break;
-    if (i > 60) throw new Error("The local Worker didn't start.");
+    if (i > 60) throw new StartupError(`The local Worker didn't start on port ${PORT}.`);
     await wait(1000);
   }
+  // Something answered: make sure it's this run's Worker, on this run's data, before any check runs
+  const ours = await fetch(`${B}/api/users/${RUN_USER}`).then(async r => r.status === 200 && (await r.json().catch(() => null))?.user?.id === RUN_USER, () => false);
+  if (!ours) throw new StartupError(`port ${PORT} answered, but not as this run's Worker (${RUN_USER} missing); not testing someone else's Worker`);
   browser = await puppeteer.launch({ executablePath: browserPath(), headless: true, userDataDir: mkdtempSync(join(tmpdir(), "th-e2e-")), args: process.env.CI ? ["--no-sandbox"] : [] });
   const errors = [];
   // #62 T5 and T6: the boxes of Home's grid, main column and "Right now" rail, with the rail shown (a stand-in line in it) or
@@ -1164,9 +1245,16 @@ try {
     r = await api("GET", "/api/users/u_e2e_delete");
     ok(r.status === 200 && r.body?.user?.name === "Deleted account", "api: the profile says Deleted account", http(r));
   }
+} catch (e) {
+  if (!(e instanceof StartupError)) throw e;
+  console.error(e.message); // no Worker of this run's to check: the browser and API checks never ran, so never "All passed"
+  startFailed = true;
 } finally {
   await browser?.close().catch(() => {});
   stopServer();
+  await waitExit();
+  removeData();
 }
+if (startFailed) process.exit(1);
 console.log(fails ? `\n${fails} failed` : "\nAll passed");
 process.exit(fails ? 1 : 0);
