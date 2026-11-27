@@ -1,5 +1,6 @@
 // Takes full-page screenshots of the site, so a person (or an agent) can look at a page before shipping a change.
-// It starts its own local Worker on throwaway seeded data (.wrangler/look, wiped each run) and opens each route in
+// It starts its own local Worker on throwaway seeded data (.wrangler/look-<run id>, removed when it stops) and on its
+// own port (one from the OS, or E2E_PORT if set, never another), checks the Worker answering is its own, and opens each route in
 // Chrome at 375x812 (phone) and 1280x800, each with and without reduced motion: four PNGs per route.
 // --dark adds each shot again in dark mode; --mid adds an 800x1000 width with the same variants.
 //   node test/e2e/look.mjs [--dark] [--mid] <route> [<route>...]   e.g. node test/e2e/look.mjs --dark root notices article-look-developing
@@ -10,9 +11,10 @@
 // Files go to .agent-tmp/look/<slug>-<375|800|1280>[-dark][-reduced].png under the current folder, overwritten each run.
 // Takes about 15 s per route with no flags, more with --dark or --mid. Ctrl+C or a kill stops the Worker and Chrome.
 // Uses Chrome or Edge from the system, or the one at CHROME_PATH. Not a test: it checks nothing and counts nothing.
+import { randomBytes } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
@@ -33,12 +35,56 @@ const routes = [...new Set(given.map(r => r === "/#" ? "/" : r))]; // "/#" is th
 const WIDTHS = [[375, 812], ...(mid ? [[800, 1000]] : []), [1280, 800]];
 const SCHEMES = dark ? [false, true] : [false];
 
-const PORT = 8792, B = `http://localhost:${PORT}`;
-const DATA = ".wrangler/look";
+// This run's id (8 hex characters, short for Windows path length), its data folder and its own marker user
+const RUN = randomBytes(4).toString("hex");
+const DATA = `.wrangler/look-${RUN}`;
+const RUN_USER = `u_e2e_run_${RUN}`;
+let PORT, B, INSPECTOR; // chosen below, before any wrangler call; B always follows PORT
+const usePort = p => { PORT = p; B = `http://localhost:${PORT}`; };
 const OUT = join(process.cwd(), ".agent-tmp", "look");
 const WRANGLER = ["wrangler", "--config", "test/wrangler.test.jsonc"];
 const win = process.platform === "win32";
 const wait = ms => new Promise(r => setTimeout(r, ms));
+
+// A connection means something is listening on that port and host; an error (refused, or no ::1 at all) means free
+const inUse = (port, host) => new Promise(r => { const s = connect(port, host); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
+const busyOn = async port => (await inUse(port, "127.0.0.1")) ? "127.0.0.1" : (await inUse(port, "::1")) ? "::1" : "";
+// A port the OS hands out on 127.0.0.1 that is also free on ::1 and isn't `avoid`: up to 5 tries
+const freePort = async (avoid = 0) => {
+  for (let i = 0; i < 5; i++) {
+    const srv = createServer();
+    await new Promise((resolve, reject) => { srv.once("error", reject); srv.listen(0, "127.0.0.1", resolve); });
+    const port = srv.address().port;
+    await new Promise(resolve => srv.close(resolve));
+    if (port !== avoid && !await inUse(port, "::1")) return port;
+  }
+  throw new Error("couldn't find a free port");
+};
+// This run's data folder goes when the run ends; a folder that won't go never fails the run
+const removeData = () => { try { rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* left behind */ } };
+
+// The port: E2E_PORT if set (in use means stop, never another port), otherwise one from the OS. Another run (or anything
+// else) can't be on it, so this run never touches another's data or Worker.
+const FORCED = process.env.E2E_PORT;
+const PORT_FROM = FORCED === undefined ? "port from the OS" : "E2E_PORT";
+if (FORCED !== undefined) {
+  if (!/^\d+$/.test(FORCED) || Number(FORCED) < 1024 || Number(FORCED) > 65535) {
+    console.error(`E2E_PORT must be a whole number from 1024 to 65535, not "${FORCED}"`);
+    process.exit(1);
+  }
+  usePort(Number(FORCED));
+  const host = await busyOn(PORT);
+  if (host) {
+    console.error(`port ${PORT} (E2E_PORT) is in use on ${host}; not starting`);
+    process.exit(1);
+  }
+} else {
+  try { usePort(await freePort()); } catch (e) { console.error(e.message); process.exit(1); }
+}
+// The inspector port, always from the OS. Left to itself wrangler 4.158.0 starts at 9229 and takes the first free port
+// (node_modules/wrangler/wrangler-dist/cli.js:214156, DEFAULT_INSPECTOR_PORT = 9229; :214913, getInspectorPort =
+// memoizeGetPort(DEFAULT_INSPECTOR_PORT, "127.0.0.1")), so two runs started together can race for the same port.
+try { INSPECTOR = await freePort(PORT); } catch (e) { console.error(e.message); process.exit(1); }
 
 // ---------- Seed: routes.mjs's rows, copied verbatim ----------
 const STORIES = [
@@ -118,6 +164,9 @@ const SEED_LOOK = [
   feed("alerts", ALERTS), // fresh, so the Worker never fetches Environment Canada
   feed("events", EVENTS),
 ].join(" "); // weather comes from SEED_WEATHER above: one row, updated now
+// This run's marker: a user only this run's data has, so the Worker on the port can be checked as ours. A user, not a
+// story, since some checks count stories exactly.
+const SEED_RUN = apiUser(RUN_USER, "password", `e2e_run_${RUN}`, "E2E Run", "member");
 
 function browserPath() {
   const found = [process.env.CHROME_PATH, "/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium",
@@ -130,25 +179,32 @@ function browserPath() {
 const npx = args => execSync(`npx ${args.join(" ")}`, { stdio: "pipe", env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
 const slug = r => r.replace(/^\//, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "root";
 
-// Another run (or anything else) on the port: stop before touching its data or starting a second Worker
-const inUse = host => new Promise(r => { const s = connect(PORT, host); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
-if (await inUse("127.0.0.1") || await inUse("::1")) {
-  console.error(`port ${PORT} is in use; is another look run still going?`);
-  process.exit(1);
-}
-
 rmSync(DATA, { recursive: true, force: true });
 npx([...WRANGLER, "d1", "migrations", "apply", "talkhalifax-test", "--local", "--persist-to", DATA]);
-writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_API} ${SEED_LOOK}`);
+writeFileSync(`${DATA}/seed.sql`, `${SEED} ${SEED_WATER} ${SEED_LAYOUT} ${SEED_WEATHER} ${SEED_API} ${SEED_LOOK} ${SEED_RUN}`);
 npx([...WRANGLER, "d1", "execute", "talkhalifax-test", "--local", "--persist-to", DATA, "--file", `${DATA}/seed.sql`]);
 
-const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
+// Both ports again, just before the Worker starts, since something may have taken them meanwhile. E2E_PORT taken: stop.
+{
+  const host = await busyOn(PORT);
+  if (host && FORCED !== undefined) {
+    console.error(`port ${PORT} (E2E_PORT) is in use on ${host}; not starting`);
+    removeData();
+    process.exit(1);
+  }
+  try {
+    if (host) usePort(await freePort(INSPECTOR));
+    if (await busyOn(INSPECTOR)) INSPECTOR = await freePort(PORT);
+  } catch (e) { console.error(e.message); removeData(); process.exit(1); }
+}
+const server = spawn("npx", [...WRANGLER, "dev", "--port", String(PORT), "--inspector-port", String(INSPECTOR), "--inspector-ip", "127.0.0.1", "--persist-to", DATA], { stdio: "ignore", shell: win, detached: !win, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
+console.log(`Local Worker: ${B} (${PORT_FROM}), inspector ${INSPECTOR}, data ${DATA}, run ${RUN}, pid ${server.pid}`);
 const stopServer = (s = server) => {
   if (!s) return;
   try { if (win) execSync(`taskkill /pid ${s.pid} /T /F`, { stdio: "ignore" }); else process.kill(-s.pid); } catch { /* already gone */ }
 };
 
-let browser, profile, bad = false, stopping = false, quitCode = null;
+let browser, profile, bad = false, stopping = false, quitCode = null, ready = false;
 const dropProfile = () => { if (profile) try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ } };
 // Signals, or the Worker dying: stop the Worker first and synchronously, then Chrome if it lets us, then exit
 const quit = code => {
@@ -156,10 +212,15 @@ const quit = code => {
   stopping = true;
   quitCode = code;
   stopServer();
+  removeData();
   Promise.race([browser?.close(), wait(5000)]).catch(() => {}).finally(() => { dropProfile(); process.exit(code); });
 };
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(signal, () => quit(code));
-server.on("exit", () => { if (!stopping) { console.error("The local Worker stopped unexpectedly."); quit(1); } });
+server.on("exit", (code, signal) => {
+  if (stopping) return;
+  console.error(ready ? "The local Worker stopped unexpectedly." : `The local Worker exited before it was ready (code ${code}, signal ${signal}), port ${PORT}`);
+  quit(1);
+});
 
 // Back to the top, then two frames and a short pause so layout and the sticky header settle
 const toTop = p => p.evaluate(() => { window.scrollTo(0, 0); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); }).then(() => wait(200));
@@ -167,9 +228,13 @@ const toTop = p => p.evaluate(() => { window.scrollTo(0, 0); return new Promise(
 try {
   for (let i = 0; ; i++) {
     if (await fetch(B + "/api/stories").then(r => r.ok, () => false)) break;
-    if (i > 60) throw new Error("The local Worker didn't start.");
+    if (i > 60) throw new Error(`The local Worker didn't start on port ${PORT}.`);
     await wait(1000);
   }
+  // Something answered: make sure it's this run's Worker, on this run's data, before any page is opened
+  const ours = await fetch(`${B}/api/users/${RUN_USER}`).then(async r => r.status === 200 && (await r.json().catch(() => null))?.user?.id === RUN_USER, () => false);
+  if (!ours) throw new Error(`port ${PORT} answered, but not as this run's Worker (${RUN_USER} missing); not testing someone else's Worker`);
+  ready = true;
   const executablePath = browserPath();
   profile = mkdtempSync(join(tmpdir(), "th-look-"));
   browser = await puppeteer.launch({ executablePath, headless: true, userDataDir: profile, args: process.env.CI ? ["--no-sandbox"] : [],
@@ -242,6 +307,7 @@ try {
   stopping = true; // our own stop, not a crash
   await browser?.close().catch(() => {});
   stopServer();
+  removeData();
   dropProfile();
 }
 if (quitCode === null) process.exit(bad ? 1 : 0); // otherwise quit() exits with its own code
