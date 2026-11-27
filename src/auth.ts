@@ -178,9 +178,10 @@ async function changePassword(req: Request, env: Env) {
   if (weak) return json({ error: weak }, { status: 400 });
   await clearThrottle(env, key);
   const sid = cookies(req)[SESSION_COOKIE];
+  // Keeps the current session in both forms: hashed, and raw if it hasn't been upgraded yet
   await env.DB.batch([
     env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(await hashPassword(password), user.id),
-    env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(user.id, sid),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ? AND id != ?").bind(user.id, await sha256hex(sid), sid),
   ]);
   return json({ ok: true });
 }
@@ -231,23 +232,48 @@ async function resetPassword(req: Request, env: Env, url: URL) {
   return sessionJson(env, url, r.id);
 }
 
-async function sessionJson(env: Env, url: URL, userId: string) {
+/**
+ * Stores a new session as the SHA-256 of its id, so a copy of the sessions table can't be used to sign in.
+ * The cookie carries the raw `s_…` id. Returns that raw id.
+ */
+async function newSession(env: Env, userId: string) {
   const sid = randomId("s_", 24);
   const now = Date.now();
   await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .bind(sid, userId, now, now + SESSION_DAYS * 864e5).run();
+    .bind(await sha256hex(sid), userId, now, now + SESSION_DAYS * 864e5).run();
+  return sid;
+}
+
+async function sessionJson(env: Env, url: URL, userId: string) {
+  const sid = await newSession(env, userId);
   return json({ ok: true }, { headers: { "set-cookie": setCookie(url, SESSION_COOKIE, sid, SESSION_DAYS * 86400) } });
 }
+
+const USER_COLUMNS = "u.id, u.name, u.avatar_url, u.email, u.role, u.banned, u.provider, u.created_at";
 
 /** The signed-in user for this request, or null. */
 export async function currentUser(req: Request, env: Env): Promise<User | null> {
   const sid = cookies(req)[SESSION_COOKIE];
   if (!sid) return null;
-  return await env.DB.prepare(
-    `SELECT u.id, u.name, u.avatar_url, u.email, u.role, u.banned, u.provider, u.created_at
-       FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.id = ? AND s.expires_at > ?`,
-  ).bind(sid, Date.now()).first<User>();
+  const hash = await sha256hex(sid);
+  const now = Date.now();
+  const user = await env.DB.prepare(
+    `SELECT ${USER_COLUMNS} FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?`,
+  ).bind(hash, now).first<User>();
+  if (user) return user;
+  // A cookie copied out of the database (a stored hash) has no "s_" prefix, so it stops here
+  if (!sid.startsWith("s_")) return null;
+  // Lazy upgrade of a session stored raw before hashing began (job #122). Remove this fallback once every session
+  // made before that deploy has expired: SESSION_DAYS (30) days after it.
+  const legacy = await env.DB.prepare(
+    `SELECT ${USER_COLUMNS} FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.id = ? AND substr(s.id, 1, 2) = 's_' AND s.expires_at > ?`,
+  ).bind(sid, now).first<User>();
+  if (!legacy) return null;
+  try {
+    await env.DB.prepare("UPDATE sessions SET id = ? WHERE id = ?").bind(hash, sid).run();
+  } catch { /* lost a race with another request upgrading the same row: the person is still signed in */ }
+  return legacy;
 }
 
 export async function upsertUser(env: Env, p: { provider: string; sub: string; name: string; avatar: string; email: string }) {
@@ -270,10 +296,7 @@ export async function upsertUser(env: Env, p: { provider: string; sub: string; n
 }
 
 async function startSession(env: Env, url: URL, userId: string, returnTo: string) {
-  const sid = randomId("s_", 24);
-  const now = Date.now();
-  await env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .bind(sid, userId, now, now + SESSION_DAYS * 864e5).run();
+  const sid = await newSession(env, userId);
   return new Response(null, {
     status: 302,
     headers: new Headers([
@@ -362,7 +385,12 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
 
   if (path === "/auth/logout" && req.method === "POST") {
     const sid = cookies(req)[SESSION_COOKIE];
-    if (sid) await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
+    // By hash; by the raw id only for an "s_" cookie (a row not yet upgraded), so a stored hash used as a cookie deletes nothing
+    if (sid) {
+      const hash = await sha256hex(sid);
+      if (sid.startsWith("s_")) await env.DB.prepare("DELETE FROM sessions WHERE id = ? OR id = ?").bind(hash, sid).run();
+      else await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(hash).run();
+    }
     return json({ ok: true }, { headers: { "set-cookie": clearSessionCookie(url) } });
   }
 

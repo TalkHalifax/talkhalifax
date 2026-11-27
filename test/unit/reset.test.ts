@@ -100,3 +100,133 @@ describe("signing out", () => {
     });
   }
 });
+
+// ---------- Sessions are stored only as the SHA-256 of the cookie (job #122) ----------
+const sha = async (s: string) =>
+  [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, "0")).join("");
+const post = (path: string, body: unknown, cookie?: string) =>
+  worker.fetch!(new Request(`${ORIGIN}${path}`, {
+    method: "POST",
+    headers: { origin: ORIGIN, "content-type": "application/json", ...(cookie ? { cookie: `th_session=${cookie}` } : {}) },
+    body: JSON.stringify(body),
+  }) as never, env, {} as ExecutionContext);
+/** The signed-in user's id for this cookie value, or null. */
+const whoIs = async (sid: string) => {
+  const r = await worker.fetch!(new Request(`${ORIGIN}/api/me`, { headers: { cookie: `th_session=${sid}` } }) as never, env, {} as ExecutionContext);
+  return (await r.json<{ user: { id: string } | null }>()).user?.id ?? null;
+};
+const cookieOf = (r: Response) => decodeURIComponent(/th_session=([^;]*)/.exec(r.headers.get("set-cookie") || "")![1]);
+const sessionIds = async () => (await env.DB.prepare("SELECT id FROM sessions ORDER BY id").all<{ id: string }>()).results.map(r => r.id);
+const seedSession = (id: string, userId: string, expiresAt = Date.now() + 36e5) =>
+  env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(id, userId, Date.now(), expiresAt).run();
+const RAW = "s_abcdefghijklmnopqrstuvwx";
+
+describe("sessions are stored as hashes", () => {
+  it("T1: sign-up and login store sha256(cookie), never the cookie", async () => {
+    const up = await post("/auth/signup", { username: "hashme", password: "a good password" });
+    expect(up.status).toBe(200);
+    const c1 = cookieOf(up);
+    expect(c1.startsWith("s_")).toBe(true);
+    expect(await sessionIds()).toEqual([await sha(c1)]);
+    const login = await post("/auth/login", { username: "hashme", password: "a good password" });
+    expect(login.status).toBe(200);
+    const c2 = cookieOf(login);
+    const ids = await sessionIds();
+    expect(ids).toContain(await sha(c2));
+    expect(ids).not.toContain(c1);
+    expect(ids).not.toContain(c2);
+    expect(await whoIs(c1)).not.toBeNull();
+    expect(await whoIs(c2)).not.toBeNull();
+  });
+
+  it("T2: a hashed row signs in; an expired hashed row doesn't", async () => {
+    await makeUser("u_h");
+    await seedSession(await sha(RAW), "u_h");
+    expect(await whoIs(RAW)).toBe("u_h");
+    const old = "s_expiredexpiredexpiredxx";
+    await seedSession(await sha(old), "u_h", Date.now() - 1000);
+    expect(await whoIs(old)).toBeNull();
+  });
+});
+
+describe("sessions made before hashing are upgraded on first use", () => {
+  it("T3: a raw s_ row signs in, is rewritten to its hash, and the cookie keeps working", async () => {
+    await makeUser("u_raw");
+    await seedSession(RAW, "u_raw");
+    expect(await whoIs(RAW)).toBe("u_raw");
+    expect(await sessionIds()).toEqual([await sha(RAW)]);
+    expect(await whoIs(RAW)).toBe("u_raw");
+  });
+
+  it("T4: an expired raw s_ row doesn't sign in and isn't rewritten", async () => {
+    await makeUser("u_old");
+    await seedSession(RAW, "u_old", Date.now() - 1000);
+    expect(await whoIs(RAW)).toBeNull();
+    expect(await sessionIds()).toEqual([RAW]);
+  });
+
+  it("T8: a raw row without the s_ prefix is never matched", async () => {
+    await makeUser("u_x");
+    await seedSession("x_abc", "u_x");
+    expect(await whoIs("x_abc")).toBeNull();
+    expect(await sessionIds()).toEqual(["x_abc"]);
+  });
+});
+
+describe("a value copied out of the sessions table is not a cookie", () => {
+  it("T5: a cookie equal to a stored hash is refused, and signing out with it leaves the row", async () => {
+    await makeUser("u_h");
+    const hash = await sha(RAW);
+    await seedSession(hash, "u_h");
+    expect(await whoIs(hash)).toBeNull();
+    expect((await post("/auth/logout", {}, hash)).status).toBe(200);
+    expect(await sessionIds()).toEqual([hash]);
+    expect(await whoIs(RAW)).toBe("u_h");
+  });
+});
+
+describe("signing out with hashed sessions", () => {
+  it("T6: removes a hashed row", async () => {
+    await makeUser("u_h");
+    await seedSession(await sha(RAW), "u_h");
+    expect((await post("/auth/logout", {}, RAW)).status).toBe(200);
+    expect(await sessionIds()).toEqual([]);
+    expect(await whoIs(RAW)).toBeNull();
+  });
+  it("T6: removes an unupgraded raw row", async () => {
+    await makeUser("u_raw");
+    await seedSession(RAW, "u_raw");
+    expect((await post("/auth/logout", {}, RAW)).status).toBe(200);
+    expect(await sessionIds()).toEqual([]);
+    expect(await whoIs(RAW)).toBeNull();
+  });
+});
+
+describe("changing a password with hashed sessions", () => {
+  const OTHER_RAW = "s_otherrawotherrawotherra", OTHER_HASHED = "s_otherhashedotherhashedo";
+  for (const current of ["hashed", "raw"] as const) {
+    it(`T7: keeps the current ${current} session and ends the person's other sessions of both kinds`, async () => {
+      const up = await post("/auth/signup", { username: "changer", password: "first password" });
+      expect(up.status).toBe(200);
+      const fresh = cookieOf(up);
+      const { id: uid } = (await env.DB.prepare("SELECT id FROM users WHERE provider_sub = 'changer'").first<{ id: string }>())!;
+      // Make the current session the given kind (whatever sign-up stored), plus one other session of each kind
+      await env.DB.prepare("DELETE FROM sessions").run();
+      await seedSession(current === "raw" ? fresh : await sha(fresh), uid);
+      await seedSession(OTHER_RAW, uid);
+      await seedSession(await sha(OTHER_HASHED), uid);
+      await makeUser("u_someone");
+      await seedSession(await sha(RAW), "u_someone");
+      const r = await post("/auth/password", { current: "first password", password: "second password" }, fresh);
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ ok: true });
+      expect(await whoIs(fresh)).toBe(uid);
+      expect(await whoIs(OTHER_RAW)).toBeNull();
+      expect(await whoIs(OTHER_HASHED)).toBeNull();
+      expect(await whoIs(RAW)).toBe("u_someone");
+      const ids = await sessionIds();
+      expect(ids).not.toContain(OTHER_RAW);
+      expect(ids).not.toContain(await sha(OTHER_HASHED));
+    });
+  }
+});
