@@ -6,7 +6,7 @@ const REPO = "TalkHalifax/talkhalifax";
 const HOUR = 36e5;
 export const GITHUB_JOBS = [
   { file: "events.yml", every: 6 * HOUR },     // library events: the feed refuses Cloudflare
-  { file: "transit.yml", every: 7 * 24 * HOUR }, // the Transit map's schedule data
+  { file: "transit.yml", every: 24 * HOUR },   // the Transit map's schedule data: daily, so a new one is caught within a day
 ];
 // The cron runs every 30 minutes, so a job isn't pushed a run later each time by a few seconds' difference
 const SLACK = 5 * 60_000;

@@ -1,8 +1,9 @@
-# Keeps the Transit map's fixed data current. Checks Halifax Transit's GTFS schedule each week; when a new one has started,
-# rebuilds the data, runs the tests, commits it to main and starts a deploy (a push made with GITHUB_TOKEN doesn't start
-# one by itself). The Worker's cron warns the editor a week before the current schedule ends, in case this doesn't run.
+# Keeps the Transit map's fixed data current. Checks Halifax Transit's GTFS schedule each day; when a new one starts
+# within 3 days, rebuilds the data, runs the tests, pushes it to a branch (transit/schedule-<version>) and opens an
+# issue saying when to merge it. Nothing reaches main without a pull request: the ruleset on main allows no other way.
+# The Worker's cron warns the editor once the current schedule has run out, in case this doesn't run.
 #
-# The Worker's cron starts this once a week (src/github-jobs.ts), because GitHub's own schedule isn't reliable here.
+# The Worker's cron starts this once a day (src/github-jobs.ts), because GitHub's own schedule isn't reliable here.
 name: Transit schedule
 
 on:
@@ -13,8 +14,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  actions: write
+  contents: write # push the transit/schedule-* branch (main is protected by the ruleset)
+  issues: write   # open the "New Transit schedule" issue
 
 jobs:
   rebuild:
@@ -34,23 +35,52 @@ jobs:
         run: |
           if git diff --quiet -- src/transit-data.json public/transit/shapes.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(node -p 'require("./src/transit-data.json").feedVersion')
+          start=$(node -p 'require("./src/transit-data.json").feedStart')
+          end=$(node -p 'require("./src/transit-data.json").feedEnd')
+          # The version becomes part of a branch name: keep only safe characters
+          safe=$(printf '%s' "$version" | tr -c 'A-Za-z0-9._-' '_')
+          branch="transit/schedule-$safe"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "version=$safe" >> "$GITHUB_OUTPUT"
+          echo "start=$(printf '%s' "$start" | tr -cd '0-9')" >> "$GITHUB_OUTPUT"
+          echo "end=$(printf '%s' "$end" | tr -cd '0-9')" >> "$GITHUB_OUTPUT"
+          # Built on an earlier day already: its branch and issue exist, so don't push or open another
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Test the new data
-        if: steps.changed.outputs.changed == 'true'
+        if: steps.changed.outputs.changed == 'true' && steps.changed.outputs.exists == 'false'
         run: |
           npm ci
           npx tsc --noEmit
           npm test
-      - name: Commit and deploy
-        if: steps.changed.outputs.changed == 'true'
+      - name: Push to a branch and open an issue
+        if: steps.changed.outputs.changed == 'true' && steps.changed.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.changed.outputs.branch }}
+          VERSION: ${{ steps.changed.outputs.version }}
+          START: ${{ steps.changed.outputs.start }}
+          END: ${{ steps.changed.outputs.end }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
           git add src/transit-data.json public/transit/shapes.json
-          git commit -m "Update the Transit map to Halifax Transit's new schedule"
-          git push
-          gh workflow run deploy.yml --ref main
+          git commit -m "Update the Transit map to Halifax Transit's schedule $VERSION"
+          git push origin "$BRANCH"
+          body=$(printf '%s\n' \
+            "Halifax Transit published a new schedule, **$VERSION**, running **$START to $END**." \
+            "" \
+            "The map's data is rebuilt and tested on the branch \`$BRANCH\`." \
+            "" \
+            "- Open a pull request from that branch: https://github.com/$GITHUB_REPOSITORY/compare/main...$BRANCH" \
+            "- **Merge it on or after $START**, not before: buses run the old schedule until then, and merging early takes their names and lines away." \
+            "- Merging deploys it as usual. Close this issue once it's live.")
+          gh issue create --title "New Transit schedule $VERSION: merge on or after $START" --body "$body"

@@ -82,7 +82,7 @@ P3 `decisions`, P4 `community`.
 | Environment Canada | Weather warnings (notices and banners), current conditions (header and menu) | `conditions`, cron |
 | Nova Scotia Power outage map | Outage notices (2,000+ customers) | `conditions` |
 | Halifax Transit GTFS-realtime (gtfs.halifax.ca) | Transit map: vehicle positions and service alerts | `/api/transit/*`, fetched at most every 12 s (alerts 2 min) per Worker isolate |
-| Halifax Transit GTFS schedule | Transit map: routes, lines, headsigns, stop names | `.github/workflows/transit.yml`, started weekly by the Worker's cron, rebuilds with `scripts/build-transit.mjs` once a new schedule has started, and deploys; the cron warns the editor in the schedule's last week |
+| Halifax Transit GTFS schedule | Transit map: routes, lines, headsigns, stop names | `.github/workflows/transit.yml`, started daily by the Worker's cron. Up to 3 days before a new schedule starts, it rebuilds with `scripts/build-transit.mjs`, tests, pushes a `transit/schedule-<version>` branch and opens a "New Transit schedule" issue saying when to merge. The pull request is opened and merged by hand, which deploys it. The cron warns the editor once the map's schedule has run out |
 | Halifax Public Libraries events (BiblioCommons RSS) | Events tab, listed as posted | Fetched by the Events GitHub Action every 6 hours (about 16 requests) and posted to the Worker; the cron warns the editor when it's over 26 hours old |
 | Google Trends (Nova Scotia) | Signal: raises lead priority | `trending` |
 | r/halifax | Signal: something may be happening | `trending` |
@@ -210,5 +210,5 @@ See [OPERATING-MODEL.md](OPERATING-MODEL.md) for what each one does. Debt and ga
   usually missing. The journalist reports it and carries on.
 - **The library's events feed refuses requests from Cloudflare** (HTTP 403), so GitHub Actions fetches it (TECH-DEBT
   **E1**). If that workflow stops, the Events tab keeps its last list and the cron warns after 26 hours.
-- **The Transit job can't push to `main`** under the ruleset (TECH-DEBT **D8**). The next time Halifax Transit starts a new schedule, the job will fail at the push and the map keeps the old data until it changes.
+- **A new Transit schedule needs a merge.** The job builds it on a branch and opens an issue, but someone has to open the pull request and merge it on or after the start date. Until then buses show without names or lines once the old schedule ends.
 - Cron expressions are in UTC, so routines run an hour later in Halifax local time from November to March.

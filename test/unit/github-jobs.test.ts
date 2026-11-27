@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGithubJobs } from "../../src/github-jobs";
 import worker from "../../src/index";
 import { SWEEP_AFTER_DAYS } from "../../src/push";
+import { jobsData } from "../../src/routes/admin-api";
 import { CRON_JOBS } from "../../src/routes/cron-jobs";
 import { env, HOUR, DAY } from "./helpers";
 
@@ -38,14 +39,23 @@ describe("starting the GitHub jobs", () => {
     await startGithubJobs(withToken, START + 30 * 60_000);
     expect(calls).toHaveLength(0);
   });
-  it("starts Events every 6 hours, without drifting, and Transit weekly", async () => {
+  it("starts Events every 6 hours, without drifting, and Transit daily", async () => {
     await startGithubJobs(withToken, START);
     calls = [];
     await startGithubJobs(withToken, START + 6 * HOUR - 60_000);
     expect(started()).toEqual(["events.yml"]);
     calls = [];
-    await startGithubJobs(withToken, START + 7 * DAY);
+    await startGithubJobs(withToken, START + 18 * HOUR - 60_000);
+    expect(started()).toEqual(["events.yml"]);
+    calls = [];
+    await startGithubJobs(withToken, START + DAY - 60_000);
     expect(started()).toEqual(["events.yml", "transit.yml"]);
+  });
+  it("lists the Transit job for the admin site as daily, late after two days", async () => {
+    await startGithubJobs(withToken, START);
+    const transit = async (now: number) => (await jobsData(env, undefined, now)).jobs.find(j => j.name === "Transit schedule")!;
+    expect(await transit(START + DAY)).toMatchObject({ every: "Daily", state: "ok", lastAt: START });
+    expect((await transit(START + 2 * DAY + 60_000)).state).toBe("late");
   });
   it("tries again next run after a refusal, tells the watch, and still starts the other job", async () => {
     status = url => url.includes("events.yml") ? 401 : 204;
@@ -137,6 +147,6 @@ describe("the cron's job list", () => {
     expect(Object.keys(fails)).toEqual(CRON_JOBS.map(j => j.key));
     // Weather and warnings need the network, and no library events have arrived; the rest can't fail here
     expect(fails).toMatchObject({ weather: 1, alerts: 1, events: 1, stages: 0, "GitHub jobs": 0, "clean-up": 0, "push sweep": 0 });
-    expect([0, 1]).toContain(fails["transit schedule"]); // fails only in the last week of the map's schedule
+    expect([0, 1]).toContain(fails["transit schedule"]); // fails only once the map's schedule has run out
   });
 });
