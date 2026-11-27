@@ -133,6 +133,8 @@ From a terminal or a cloud routine: `node scripts/newsroom.mjs tool <name> [json
 
 ## Data (D1 tables)
 
+Backing up and restoring this data: [RECOVERY.md](RECOVERY.md). D1 Time Travel covers every table below, the whole database at once; chat rooms' Durable Object storage isn't covered.
+
 `users`, `sessions`, `auth_throttle` (rate limits, cleared after a day), `stories`, `story_versions`, `room_stats`,
 `message_index` (a copy of every chat message), `comments`, `feeds` (cached weather, weather warnings and library events, plus the cron's failure counts and when the alert clean-up last ran, `push-sweep`), `leads`,
 `pending_updates`, `reports`, `password_resets`, `push_subs` (one row per browser with alerts on: its push address,
