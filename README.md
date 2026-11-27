@@ -73,6 +73,7 @@ The custom domain `admin.talkhalifax.ca` is set in **Workers & Pages › talkhal
 **What this repo owes the admin site:**
 - `AdminApi` changes only add: change `main` here first, then the admin repo, and remove an old shape only once admin no longer uses it. The admin repo's CI type-checks against `src/routes/admin-api.ts` here and runs its browser check against this repo's `main`, so tell the Admin team (through the orchestrator) before changing `AdminApi`, `test/wrangler.test.jsonc`, `/api/stories`, the seed's columns or the `wrangler` version.
 - Never roll the main Worker back past the version that added `AdminApi` (commit `f05802c`): admin depends on it.
+- Restoring the database (D1 Time Travel, test restores, what can't come back): [docs/RECOVERY.md](docs/RECOVERY.md). The editor runs every live command.
 - Never bring the admin deploy steps back into this repo's `deploy.yml` (removed in #47). Both repos would then deploy `talkhalifax-admin`, and this one would overwrite it with an old copy.
 
 ## Moderators
