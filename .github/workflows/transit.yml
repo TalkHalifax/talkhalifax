@@ -1,7 +1,7 @@
 # Keeps the Transit map's fixed data current. Checks Halifax Transit's GTFS schedule each day; when a new one starts
 # within 3 days, rebuilds the data, runs the tests, pushes it to a branch (transit/schedule-<version>) and opens an
 # issue saying when to merge it. Nothing reaches main without a pull request: the ruleset on main allows no other way.
-# The Worker's cron warns the editor once the current schedule has run out, in case this doesn't run.
+# The Worker's cron warns the editor on the current schedule's last day, in case this doesn't run.
 #
 # The Worker's cron starts this once a day (src/github-jobs.ts), because GitHub's own schedule isn't reliable here.
 name: Transit schedule
@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false # keep the token out of .git/config while npm ci and the tests run
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -40,15 +42,19 @@ jobs:
           version=$(node -p 'require("./src/transit-data.json").feedVersion')
           start=$(node -p 'require("./src/transit-data.json").feedStart')
           end=$(node -p 'require("./src/transit-data.json").feedEnd')
-          # The version becomes part of a branch name: keep only safe characters
-          safe=$(printf '%s' "$version" | tr -c 'A-Za-z0-9._-' '_')
+          # The version becomes part of a branch name and an issue: keep only safe characters, at most 64
+          safe=$(printf '%s' "$version" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-64)
+          if [ -z "$safe" ]; then
+            echo "::error::The new schedule has no feed_version, so it can't be named. Rebuild it by hand."
+            exit 1
+          fi
           branch="transit/schedule-$safe"
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "version=$safe" >> "$GITHUB_OUTPUT"
           echo "start=$(printf '%s' "$start" | tr -cd '0-9')" >> "$GITHUB_OUTPUT"
           echo "end=$(printf '%s' "$end" | tr -cd '0-9')" >> "$GITHUB_OUTPUT"
-          # Built on an earlier day already: its branch and issue exist, so don't push or open another
+          # Built on an earlier day already: don't test or push again. The issue step below still runs.
           if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -60,8 +66,24 @@ jobs:
           npm ci
           npx tsc --noEmit
           npm test
-      - name: Push to a branch and open an issue
+      - name: Push to a branch
         if: steps.changed.outputs.changed == 'true' && steps.changed.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.changed.outputs.branch }}
+          VERSION: ${{ steps.changed.outputs.version }}
+        run: |
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add src/transit-data.json public/transit/shapes.json
+          git commit -m "Update the Transit map to Halifax Transit's schedule $VERSION"
+          git push origin "$BRANCH"
+      # Runs every day the new schedule isn't merged yet, so an issue that failed to open, or was closed without a
+      # merge, comes back the next day
+      - name: Make sure its issue is open
+        if: steps.changed.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.changed.outputs.branch }}
@@ -69,18 +91,18 @@ jobs:
           START: ${{ steps.changed.outputs.start }}
           END: ${{ steps.changed.outputs.end }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          git add src/transit-data.json public/transit/shapes.json
-          git commit -m "Update the Transit map to Halifax Transit's schedule $VERSION"
-          git push origin "$BRANCH"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"New Transit schedule $VERSION\" in:title" --json number --jq length)
+          if [ "$open" != "0" ]; then
+            echo "Its issue is already open."
+            exit 0
+          fi
+          tick='`'
           body=$(printf '%s\n' \
-            "Halifax Transit published a new schedule, **$VERSION**, running **$START to $END**." \
+            "Halifax Transit published a new schedule, $tick$VERSION$tick, running **$START to $END**." \
             "" \
-            "The map's data is rebuilt and tested on the branch \`$BRANCH\`." \
+            "The map's data is rebuilt and tested on the branch $tick$BRANCH$tick." \
             "" \
             "- Open a pull request from that branch: https://github.com/$GITHUB_REPOSITORY/compare/main...$BRANCH" \
             "- **Merge it on or after $START**, not before: buses run the old schedule until then, and merging early takes their names and lines away." \
             "- Merging deploys it as usual. Close this issue once it's live.")
-          gh issue create --title "New Transit schedule $VERSION: merge on or after $START" --body "$body"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "New Transit schedule $VERSION: merge on or after $START" --body "$body"

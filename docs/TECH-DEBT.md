@@ -48,7 +48,7 @@ The [roadmap](ROADMAP.md) says when each one is scheduled.
 
 ## Paid off
 
-- **Nov. 26, 2026:** **D8** closed (#67). The Transit job no longer pushes to `main`: it checks daily, builds a new schedule up to 3 days before it starts on a `transit/schedule-<version>` branch, and opens an issue saying when to merge. The cron's Transit check now fails only once the map's schedule has run out, not every 30 minutes through its last week.
+- **Nov. 26, 2026:** **D8** closed (#67). The Transit job no longer pushes to `main`: it checks daily, builds a new schedule up to 3 days before it starts on a `transit/schedule-<version>` branch, and opens an issue saying when to merge. The cron's Transit check now fails from the schedule's last day, not every 30 minutes through its last week. If the issue fails to open, or is closed without a merge, the next day's run opens it again.
 - **Nov. 16, 2026:** **C8** closed. The deploy stamps the site version, `v<PR number>`, into the footer and the service worker (`BUILD` in `public/sw.js`) from the merge commit, so the app files renew on every deploy; the saved-stories cache keeps a fixed name so readers never lose saved stories (#54, Site & Design System and Platform Core). The `th-vN` base is bumped by hand only when the cache layout changes.
 - **Nov. 11, 2026:** every `/api` route has an end-to-end check (123 new checks, PC-2, Platform Core), the first change made through the drafts path for protected files. `/auth/*`, `/mcp`, `/telegram/*` and the chat WebSocket still have none.
 - **Nov. 10, 2026:** library event links and pictures are checked before they reach the page: a `javascript:` link or a picture address that could break out of its CSS can no longer come through the feed (EVT-2, Events).

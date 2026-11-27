@@ -22,7 +22,7 @@ const JOBS = [
   { name: "Weather warnings", does: "Environment Canada banners and notices", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Events check", does: "Warns when library events stop arriving", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Stages", does: "Moves Developing stories to Articles", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
-  { name: "Transit schedule check", does: "Warns once the map's schedule data has run out", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
+  { name: "Transit schedule check", does: "Warns from the last day of the map's schedule data", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "GitHub jobs", does: "Starts the library events and Transit jobs", every: "30 minutes", lastAt: 1794054000000, state: "ok", failures: 0 },
   { name: "Clean-up", does: "Expired sessions, links, rate limits and old counts", every: "30 minutes", lastAt: 1794054000000, state: "failing", failures: 1 },
   { name: "Alert address clean-up", does: "Deletes alert addresses with no alert reaching them or change in 180 days, or after five failed alerts", every: "Daily (checked every 30 minutes)", lastAt: 1794054000000, state: "ok", failures: 0 },
