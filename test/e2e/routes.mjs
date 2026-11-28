@@ -332,16 +332,42 @@ try {
     }
 
     // Only a boil-water advisory pins to Home; one street's emergency shut-off stays on Notices
+    // #114: each page holds back its first /api/stories request until the page has reached load, then lets it go, so the
+    // stories always arrive after load and these reads can only pass by waiting for them. Interception has to be on before
+    // the page loads, so these pages are set up by hand rather than with open(), as with the held weather below.
     {
-      const p = await open("home");
-      // The seeded wind warning comes first and folds the rest behind "+1 more"
-      await p.evaluate(() => document.getElementById("abarMore")?.click());
+      const openHeld = async hash => {
+        const p = await browser.newPage();
+        p.on("pageerror", e => errors.push(`${label} #${hash} (held stories): ${e.message}`));
+        await p.setViewport({ width, height, isMobile: width < 500, hasTouch: width < 500 });
+        await p.setBypassServiceWorker(true); // sw.js answers /api/stories itself, where the page's interception can't hold it
+        await p.setRequestInterception(true);
+        let loaded = false, held = null;
+        p.on("request", r => {
+          let path = "";
+          try { path = new URL(r.url()).pathname; } catch { /* not a URL: let it through */ }
+          if (path === "/api/stories" && !loaded && !held) { held = r; return; }
+          r.continue().catch(() => {});
+        });
+        await p.goto(`${B}/#${hash}`, { waitUntil: "load" });
+        loaded = true;
+        await held?.continue().catch(() => {});
+        return p;
+      };
+      const p = await openHeld("home");
+      // The seeded wind warning comes first and folds the rest behind "+1 more": wait until the stories are in and the bar
+      // is folded, then open it once (a second click would fold it again)
+      await p.waitForFunction(() => document.getElementById("abars").innerText.includes("Wind warning in effect") && !!document.querySelector('#abarMore[aria-expanded="false"]'), { timeout: 10000 }).catch(() => {});
+      await p.evaluate(() => document.querySelector('#abarMore[aria-expanded="false"]')?.click());
+      await p.waitForFunction(() => !!document.querySelector('#abars [data-article="hw-e2e-boil"]'), { timeout: 10000 }).catch(() => {});
       const bars = await p.evaluate(() => document.getElementById("abars").innerText);
-      ok(bars.includes("Boil Water Advisory"), `${label}: a boil-water advisory pins to Home`);
+      ok(bars.includes("Boil Water Advisory"), `${label}: a boil-water advisory pins to Home`, bars);
       ok(!bars.includes("One Street"), `${label}: a one-street shut-off doesn't`);
       await p.close();
-      const n = await open("notices");
-      ok((await n.evaluate(() => document.getElementById("notices").innerText)).includes("One Street"), `${label}: the shut-off is on Notices`);
+      const n = await openHeld("notices");
+      await n.waitForFunction(() => !!document.querySelector('#nActive [data-article="hw-e2e-shutoff"]'), { timeout: 10000 }).catch(() => {});
+      const notices = await n.evaluate(() => document.getElementById("notices").innerText);
+      ok(notices.includes("One Street"), `${label}: the shut-off is on Notices`, notices);
       await n.close();
     }
 
