@@ -75,8 +75,9 @@ npx wrangler d1 create th-restore-test
 npx wrangler d1 export talkhalifax --remote --output=C:\restore-test\talkhalifax.sql
 ```
 - **Changes:** nothing in the data, but it **blocks live requests while it runs**.
-- **The file is sensitive:** emails, password hashes and **live session tokens**. Keep it outside the repo folder,
-  never commit, upload or paste it, and delete it at the end.
+- **The file is sensitive:** emails and password hashes. Since #122 (Nov. 27, 2026) sessions are stored only as
+  hashes, but sessions from before that stay as **live session tokens** until they're next used or expire, by Dec. 27,
+  2026 (#123). Keep the file outside the repo folder, never commit, upload or paste it, and delete it at the end.
 - **Check:** the file exists and opens with `CREATE TABLE` lines. Note the time it took: that's how long a weekly
   export would pause the site. If wrangler refuses because of virtual tables, stop and report it.
 
