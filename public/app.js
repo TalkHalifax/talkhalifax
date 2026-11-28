@@ -82,11 +82,11 @@ function applyChatState() {
 }
 window.addEventListener("resize", applyChatState);
 
-/** Back to the list the story lives in: Notices, Articles for settled ones, Developing Stories for the rest. */
+/** Back to the list the story lives in: Notices, Articles for settled ones, Home for the rest (and where there's no story: profiles, reset, loading). */
 const back = a => a && a.kind === "notice" ? `<button type="button" class="back" data-go="notices">← Notices</button>`
   : a && a.kind === "article" && a.stage === "archived"
   ? `<button type="button" class="back" data-go="articles">← Articles</button>`
-  : `<button type="button" class="back" data-go="home">← Developing Stories</button>`;
+  : `<button type="button" class="back" data-go="home">← Home</button>`;
 
 function wireChat(v) {
   const head = $("#chatHead"), toggle = $("#chatToggle"), reopen = $("#chatReopen");
@@ -162,7 +162,7 @@ function renderDrawer() {
       <button type="button" class="dr-x" id="drClose" aria-label="Close menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <nav class="dr-nav" aria-label="Sections">
-      <button type="button" class="dr-link" data-go="home"${here("home")}>Developing Stories${live ? `<span class="n">${live} LIVE</span>` : ""}</button>
+      <button type="button" class="dr-link" data-go="home"${here("home")}>Home${live ? `<span class="n">${live} LIVE</span>` : ""}</button>
       <button type="button" class="dr-link" data-go="articles"${here("articles")}>Articles</button>
       <button type="button" class="dr-link" data-go="notices"${here("notices")}>Notices${urgent ? `<span class="n">${urgent} URGENT</span>` : ""}</button>
       <button type="button" class="dr-link" data-go="events"${here("events")}>Events</button>
@@ -193,7 +193,7 @@ drawer.addEventListener("click", e => { if (e.target === drawer) closeDrawer(); 
 window.matchMedia("(max-width: 760px)").addEventListener("change", e => { if (!e.matches) closeDrawer(); });
 $("#meBtn").addEventListener("click", () => phone() ? openDrawer() : goTo("profile"));
 
-// ---------- Navigation: Developing Stories (home), Articles, a profile, or one article room ----------
+// ---------- Navigation: Home, Articles, a profile, or one article room ----------
 const VIEWS = ["home", "articles", "notices", "events", "transit", "profile", "privacy"];
 function show(v) {
   let toAlerts = false;
